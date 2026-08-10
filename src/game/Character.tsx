@@ -7,7 +7,7 @@ import {
 import type { SharedValue } from "react-native-reanimated";
 
 import { FRAME_HEIGHT, FRAME_WIDTH } from "./characterSheet";
-import { PIXEL_ART } from "./Room";
+import { PIXEL_ART } from "./atlas";
 
 type CharacterProps = {
   /** Position of the character's feet, in room pixels. */
@@ -16,6 +16,20 @@ type CharacterProps = {
   /** Which frame of the sheet to draw. */
   column: SharedValue<number>;
   row: SharedValue<number>;
+  /**
+   * Camera position, in screen pixels - the same value the world's own
+   * Group transform uses, so the character tracks the camera exactly.
+   */
+  camera: SharedValue<{ x: number; y: number }>;
+  /** Screen pixels per room pixel for the world (tiles, items). */
+  worldScale: number;
+  /**
+   * Screen pixels per sprite pixel for the character - deliberately its own
+   * number, independent of worldScale, so the character can read as bigger
+   * than strict tile-proportion without the world having to zoom in to match.
+   * Both must stay whole numbers - see roomLayout.ts's "Integer scale only".
+   */
+  characterScale: number;
 };
 
 /**
@@ -24,8 +38,21 @@ type CharacterProps = {
  * Skia has no "source rect" on <Image>, so we use Atlas with one sprite: the
  * rect picks the frame, the RSXform places it. Both are Reanimated buffers, so
  * the sprite is re-cut on the UI thread whenever the animation advances.
+ *
+ * Unlike the room's Character usage, the village draws this character
+ * *outside* the world's scaled Group (see HomeScreen.tsx) so it can carry its
+ * own scale - the RSXform below does the camera placement itself instead of
+ * inheriting an ambient transform.
  */
-export const Character = ({ x, y, column, row }: CharacterProps) => {
+export const Character = ({
+  x,
+  y,
+  column,
+  row,
+  camera,
+  worldScale,
+  characterScale,
+}: CharacterProps) => {
   const sheet = useImage(
     require("../assets/sprites/player/Premade_Character_03.png"),
   );
@@ -42,8 +69,16 @@ export const Character = ({ x, y, column, row }: CharacterProps) => {
 
   const transforms = useRSXformBuffer(1, (xform) => {
     "worklet";
-    // Anchored by the feet: the bottom centre of the frame sits on (x, y).
-    xform.set(1, 0, x.value - FRAME_WIDTH / 2, y.value - FRAME_HEIGHT);
+    // Feet position in screen pixels - same mapping the world Group uses.
+    const feetX = camera.value.x + x.value * worldScale;
+    const feetY = camera.value.y + y.value * worldScale;
+    // Anchored by the feet: the bottom centre of the frame sits on (feetX, feetY).
+    xform.set(
+      characterScale,
+      0,
+      feetX - (FRAME_WIDTH * characterScale) / 2,
+      feetY - FRAME_HEIGHT * characterScale,
+    );
   });
 
   return (

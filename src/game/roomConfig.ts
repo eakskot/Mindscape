@@ -23,8 +23,8 @@ export type RoomConfig = {
 export const ROOM_CONFIG: RoomConfig = {
   columns: 12,
   rows: 9,
-  floorStyle: 7, // warm wooden planks
-  wallStyle: 38, // light wallpaper with diamonds
+  floorStyle: 9, // warm wooden planks
+  wallStyle: 39, // light wallpaper with diamonds
 };
 
 export const FLOOR_STYLE_COUNT = styleCount(FLOOR_TILESET);

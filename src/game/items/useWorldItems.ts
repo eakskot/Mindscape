@@ -4,13 +4,18 @@
  *
  * A placed item is `{ instanceId, itemId, x, y }` and nothing else, so the whole
  * room is JSON-serialisable - that is what `serialize` / `restore` are for when
- * we add saving. The same hook works for an outdoor scene; it only needs bounds.
+ * we add saving. The same hook works for an outdoor scene - it only needs
+ * `bounds` (where items may be placed) and, optionally, `staticObstacles`
+ * (fixed collision, e.g. the village's imported tile collision, that items
+ * add on top of rather than replace).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSharedValue } from "react-native-reanimated";
 
-import { ROOM, TILE } from "../roomLayout";
+import type { Bounds } from "../bounds";
+import { clamp } from "../bounds";
+import { TILE } from "../tilesets";
 import { ITEM_CATALOG, type ItemId, type Rect } from "./itemCatalog";
 
 export type PlacedItem = {
@@ -21,20 +26,7 @@ export type PlacedItem = {
   y: number;
 };
 
-/** Bounds an item may be dragged within. Same shape for a future outdoor scene. */
-export type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
-
-const ROOM_BOUNDS: Bounds = {
-  minX: TILE,
-  minY: TILE,
-  maxX: ROOM.width - TILE,
-  maxY: ROOM.height - TILE,
-};
-
 const snap = (value: number) => Math.round(value / TILE) * TILE;
-
-const clamp = (value: number, min: number, max: number) =>
-  Math.min(Math.max(value, min), max);
 
 /** The floor rect an item occupies, in room pixels. */
 export const collisionRect = (item: PlacedItem): Rect => {
@@ -64,46 +56,58 @@ export const hitTest = (item: PlacedItem, roomX: number, roomY: number) => {
   );
 };
 
-export const useWorldItems = () => {
+export const useWorldItems = (bounds: Bounds, staticObstacles: Rect[] = []) => {
   const [items, setItems] = useState<PlacedItem[]>([]);
   const nextId = useRef(1);
 
   /**
    * Collision rects, mirrored into a shared value so the character's movement
-   * worklet can read them without crossing to the JS thread.
+   * worklet can read them without crossing to the JS thread. Static
+   * obstacles (e.g. imported tile collision) sit underneath the item
+   * footprints, which change as items are placed, moved and removed.
    */
-  const obstacles = useSharedValue<Rect[]>([]);
+  const obstacles = useSharedValue<Rect[]>(staticObstacles);
   useEffect(() => {
-    obstacles.value = items
-      .filter((item) => ITEM_CATALOG[item.itemId].solid)
-      .map(collisionRect);
+    obstacles.value = [
+      ...staticObstacles,
+      ...items
+        .filter((item) => ITEM_CATALOG[item.itemId].solid)
+        .map(collisionRect),
+    ];
+    // staticObstacles is scene data (room vs village) that does not change
+    // once mounted - only `items` actually varies from here.
   }, [items, obstacles]);
 
-  const placeItem = useCallback((itemId: ItemId) => {
-    const definition = ITEM_CATALOG[itemId];
-    setItems((current) => {
-      // Drop new items near the middle, nudged so a stack of them stays visible.
-      const nudge = (current.length % 4) * TILE;
-      const x = snap(
-        clamp(
-          (ROOM.width - definition.width) / 2 + nudge,
-          ROOM_BOUNDS.minX,
-          ROOM_BOUNDS.maxX - definition.width,
-        ),
-      );
-      const y = snap(
-        clamp(
-          (ROOM.height - definition.height) / 2,
-          ROOM_BOUNDS.minY,
-          ROOM_BOUNDS.maxY - definition.height,
-        ),
-      );
-      return [
-        ...current,
-        { instanceId: `item-${nextId.current++}`, itemId, x, y },
-      ];
-    });
-  }, []);
+  const placeItem = useCallback(
+    (itemId: ItemId) => {
+      const definition = ITEM_CATALOG[itemId];
+      setItems((current) => {
+        // Drop new items near the middle, nudged so a stack of them stays visible.
+        const nudge = (current.length % 4) * TILE;
+        const centerX = (bounds.minX + bounds.maxX) / 2;
+        const centerY = (bounds.minY + bounds.maxY) / 2;
+        const x = snap(
+          clamp(
+            centerX - definition.width / 2 + nudge,
+            bounds.minX,
+            bounds.maxX - definition.width,
+          ),
+        );
+        const y = snap(
+          clamp(
+            centerY - definition.height / 2,
+            bounds.minY,
+            bounds.maxY - definition.height,
+          ),
+        );
+        return [
+          ...current,
+          { instanceId: `item-${nextId.current++}`, itemId, x, y },
+        ];
+      });
+    },
+    [bounds],
+  );
 
   const moveItem = useCallback(
     (instanceId: string, x: number, y: number, snapToGrid = true) => {
@@ -113,16 +117,8 @@ export const useWorldItems = () => {
             return item;
           }
           const definition = ITEM_CATALOG[item.itemId];
-          const nextX = clamp(
-            x,
-            ROOM_BOUNDS.minX,
-            ROOM_BOUNDS.maxX - definition.width,
-          );
-          const nextY = clamp(
-            y,
-            ROOM_BOUNDS.minY,
-            ROOM_BOUNDS.maxY - definition.height,
-          );
+          const nextX = clamp(x, bounds.minX, bounds.maxX - definition.width);
+          const nextY = clamp(y, bounds.minY, bounds.maxY - definition.height);
           return {
             ...item,
             x: snapToGrid ? snap(nextX) : nextX,
@@ -131,7 +127,7 @@ export const useWorldItems = () => {
         }),
       );
     },
-    [],
+    [bounds],
   );
 
   const removeItem = useCallback((instanceId: string) => {

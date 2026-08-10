@@ -9,7 +9,7 @@ import {
 } from "@shopify/react-native-skia";
 import { useDerivedValue, type SharedValue } from "react-native-reanimated";
 
-import { PIXEL_ART } from "../Room";
+import { PIXEL_ART } from "../atlas";
 import {
   ITEM_CATALOG,
   type ItemDefinition,

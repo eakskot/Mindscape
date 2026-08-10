@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { ALL_ITEMS, type ItemId } from "./itemCatalog";
+import { type ItemId, unlockedItems } from "./itemCatalog";
 
 /**
  * Throwaway test UI, not the shop. It exists to exercise the item system:
@@ -27,7 +27,7 @@ export const DevInventory = ({
   placedCount,
 }: DevInventoryProps) => {
   const [open, setOpen] = useState(false);
-  const items = ALL_ITEMS.filter((item) => item.unlocked);
+  const items = unlockedItems();
 
   return (
     <View style={styles.root} pointerEvents="box-none">

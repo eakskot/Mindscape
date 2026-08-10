@@ -42,9 +42,6 @@ export const FRAME_HEIGHT = 32;
 
 export type Direction = "right" | "up" | "left" | "down";
 
-/** Block order inside a four-directional row. */
-export const DIRECTIONS: Direction[] = ["right", "up", "left", "down"];
-
 export type AnimationName = "idle" | "walk" | "sleep" | "phone" | "book" | "sit";
 
 export type Clip = {

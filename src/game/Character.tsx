@@ -6,8 +6,9 @@ import {
 } from "@shopify/react-native-skia";
 import type { SharedValue } from "react-native-reanimated";
 
-import { FRAME_HEIGHT, FRAME_WIDTH } from "./characterSheet";
 import { PIXEL_ART } from "./atlas";
+import { FRAME_HEIGHT, FRAME_WIDTH } from "./characterSheet";
+import { toScreenPoint } from "./entitySprite";
 
 type CharacterProps = {
   /** Position of the character's feet, in room pixels. */
@@ -29,7 +30,9 @@ type CharacterProps = {
    * than strict tile-proportion without the world having to zoom in to match.
    * Both must stay whole numbers - see roomLayout.ts's "Integer scale only".
    */
-  characterScale: number;
+  entityScale: number;
+  /** Device pixels per RN point - see entitySprite.ts's toScreenPoint. */
+  density: number;
 };
 
 /**
@@ -39,9 +42,9 @@ type CharacterProps = {
  * rect picks the frame, the RSXform places it. Both are Reanimated buffers, so
  * the sprite is re-cut on the UI thread whenever the animation advances.
  *
- * Unlike the room's Character usage, the village draws this character
- * *outside* the world's scaled Group (see HomeScreen.tsx) so it can carry its
- * own scale - the RSXform below does the camera placement itself instead of
+ * Draws *outside* the world's scaled Group (see HomeScreen.tsx) so it can
+ * carry its own scale - the RSXform below does the camera placement itself
+ * (via entitySprite.ts's toScreenPoint, shared with placed items) instead of
  * inheriting an ambient transform.
  */
 export const Character = ({
@@ -51,7 +54,8 @@ export const Character = ({
   row,
   camera,
   worldScale,
-  characterScale,
+  entityScale,
+  density,
 }: CharacterProps) => {
   const sheet = useImage(
     require("../assets/sprites/player/Premade_Character_03.png"),
@@ -69,15 +73,13 @@ export const Character = ({
 
   const transforms = useRSXformBuffer(1, (xform) => {
     "worklet";
-    // Feet position in screen pixels - same mapping the world Group uses.
-    const feetX = camera.value.x + x.value * worldScale;
-    const feetY = camera.value.y + y.value * worldScale;
-    // Anchored by the feet: the bottom centre of the frame sits on (feetX, feetY).
+    const feet = toScreenPoint(x.value, y.value, camera.value, worldScale, density);
+    // Anchored by the feet: the bottom centre of the frame sits on `feet`.
     xform.set(
-      characterScale,
+      entityScale,
       0,
-      feetX - (FRAME_WIDTH * characterScale) / 2,
-      feetY - FRAME_HEIGHT * characterScale,
+      feet.x - (FRAME_WIDTH * entityScale) / 2,
+      feet.y - FRAME_HEIGHT * entityScale,
     );
   });
 

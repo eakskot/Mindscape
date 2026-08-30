@@ -105,6 +105,13 @@ middle, 2 end cap). Style numbering runs down the leftmost column first; see the
    footprint, so it can walk out.
 6. **Assumed an animation existed because a row looked like it** (thought row 17 was running).
    The pack ships a labelled guide image; check it instead of interpreting sprites.
+7. **`useAnimatedReaction`'s first callback after mount has `previousIndex === null`,** which
+   trivially differs from any real value. A portal-trigger check that fired on "index changed since
+   last time" fired spuriously on the very first evaluation whenever a scene's arrival spawn point
+   sat inside a trigger and the gating flag (`controlled`) turned true before that first evaluation
+   ran - looking exactly like the character crossing the boundary, when it had never moved. Guard
+   explicitly against `previousIndex === null` so only a second-or-later (i.e. real, measured)
+   change can fire. See `src/game/portals.ts`.
 
 ## Rules we follow
 
@@ -112,9 +119,22 @@ middle, 2 end cap). Style numbering runs down the leftmost column first; see the
   render a mock of the result. It is far cheaper than a device round-trip.
 - **Verify after writing code**, and say plainly what was *not* verified. `tsc` green is the floor,
   not the ceiling; take a screenshot and look at it.
-- **Touch tooling does not exist.** Neither `idb` nor `cliclick` is installed, so a subagent or
-  session cannot tap the simulator. Anything gated behind a tap must be handed to the user, or
-  exercised by temporarily seeding state in code.
+- **Touch tooling: `idb` is installed** (`idb_companion` + the `idb` CLI, via `brew tap facebook/fb
+  && brew install idb-companion` + `pip3 install fb-idb`). Start the companion once per simulator
+  boot (`idb_companion --udid <udid> &`), then `idb ui tap --udid <udid> <x> <y>`. In practice its
+  coordinate space did not line up reliably with either the simulator's points (`idb describe`'s
+  `width_points`/`height_points`) or its raw screenshot pixels in this project - taps landed
+  noticeably off-target even after accounting for both, and pinning down the actual mapping wasn't
+  worth the time. For anything needing a *precise* room-pixel target (e.g. hitting a small trigger
+  zone), prefer seeding state in code (call `walkTo(x, y)` etc. directly from a `// TEMP` effect)
+  over calculating tap coordinates - it is exact and it is what actually caught the two portal bugs
+  below. Reach for a real `idb ui tap` only when a genuine touch round-trip (not just a resulting
+  position) is what's being verified, and confirm the target visually before trusting the result.
+- **`runOnJS(console.log)` throws and freezes the whole UI-thread runtime.** Worklets rejects
+  passing `console.log` straight to `runOnJS` ("locally defined function passed to scheduleOnRN") -
+  the exception silently halts every worklet on that thread, including unrelated `useFrameCallback`
+  loops, which looks exactly like a frozen/stuck character. Wrap it first:
+  `const log = (...a) => console.log(...a); runOnJS(log)(...)`.
 - **Temporary scaffolding is removed before reporting.** Mark it `// TEMP` and grep for it.
 - **Don't invent art.** Compose from pack tiles; if a piece is missing, say so.
 - **Keep the renderer style-agnostic.** New art variants should be data, not code branches.

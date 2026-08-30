@@ -54,6 +54,15 @@ export const useCharacter = (
   const bestDistance = useSharedValue(Infinity);
   const stuckFor = useSharedValue(0);
 
+  /**
+   * Whether the character is currently heading somewhere because the player
+   * asked (`walkTo`), as opposed to its own idle wandering (`pickTarget`).
+   * Exposed so things like portals (see portals.ts) can tell the difference
+   * - wandering into a door on its own shouldn't switch scenes, only an
+   * actual tap should.
+   */
+  const controlled = useSharedValue(false);
+
   const animation = useSharedValue<AnimationName>("idle");
   const direction = useSharedValue<Direction>("down");
 
@@ -119,6 +128,7 @@ export const useCharacter = (
         targetY.value = nextY;
         bestDistance.value = Infinity;
         stuckFor.value = 0;
+        controlled.value = false;
         return;
       }
     }
@@ -131,6 +141,7 @@ export const useCharacter = (
     targetY.value = y.value;
     bestDistance.value = Infinity;
     stuckFor.value = 0;
+    controlled.value = false;
   };
 
   useFrameCallback((frameInfo) => {
@@ -223,9 +234,10 @@ export const useCharacter = (
       targetY.value = clamp(roomY, walkable.minY, walkable.maxY);
       bestDistance.value = Infinity;
       stuckFor.value = 0;
+      controlled.value = true;
     },
-    [targetX, targetY, bestDistance, stuckFor, walkable],
+    [targetX, targetY, bestDistance, stuckFor, controlled, walkable],
   );
 
-  return { x, y, column, row, walkTo };
+  return { x, y, column, row, walkTo, controlled };
 };

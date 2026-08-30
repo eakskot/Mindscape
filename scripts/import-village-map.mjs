@@ -4,9 +4,14 @@
  *
  * Reads the .tmx directly (regex-based - the map only uses inline tilesets
  * and plain CSV layer data, so a full XML parser is not needed), crops every
- * layer down to the configured window, strips Tiled's per-tile flip flags,
- * copies the tileset images into the app, and writes a generated data module
- * the game imports at build time.
+ * layer down to the configured window, copies the tileset images into the
+ * app, and writes a generated data module the game imports at build time.
+ * Tiled's per-tile flip/rotate bits are kept as-is in the exported GIDs -
+ * villageLayout.ts decodes them into each Tile's rotate/flip at scene-build
+ * time, not here, so this script stays a dumb crop-and-copy step. Per-tile
+ * <animation> blocks (Tiled's own animated-tile feature, e.g. water waves)
+ * are read here, though, since they live inside each <tileset>'s own XML -
+ * not something a per-cell GID decode could ever recover.
  *
  * Re-run this after editing map.tmx in Tiled:
  *   node scripts/import-village-map.mjs
@@ -54,10 +59,49 @@ if (!mapMatch) {
 const mapWidth = Number(mapMatch[1]);
 const mapHeight = Number(mapMatch[2]);
 
-/** Inline tilesets only - this map does not reference external .tsx files. */
+/**
+ * Inline tilesets only - this map does not reference external .tsx files.
+ * Captures each tileset's own inner XML too (group 7), so animated-tile
+ * definitions - which live inside <tile id="X"><animation>...</animation>
+ * blocks nested in the tileset, not per-cell - can be pulled from the right
+ * tileset's own local id space.
+ */
 const tilesets = [];
 const tilesetRe =
-  /<tileset firstgid="(\d+)" name="([^"]+)"[^>]*\bcolumns="(\d+)"[^>]*>\s*<image source="([^"]+)" width="(\d+)" height="(\d+)"/g;
+  /<tileset firstgid="(\d+)" name="([^"]+)"[^>]*\bcolumns="(\d+)"[^>]*>\s*<image source="([^"]+)" width="(\d+)" height="(\d+)"[^>]*\/?>([\s\S]*?)<\/tileset>/g;
+
+/**
+ * All animation frames within one <tileset>'s XML, keyed by the animated
+ * tile's own local id. Every animation in this map so far uses a uniform
+ * duration across all its frames, so that's what's stored (not a per-frame
+ * duration array) - accurate today, and simpler for the game to consume;
+ * revisit if a future animation actually needs uneven frame timing.
+ */
+const parseAnimations = (tilesetXml) => {
+  const animations = {};
+  const tileRe = /<tile id="(\d+)">\s*<animation>([\s\S]*?)<\/animation>/g;
+  for (const tileMatch of tilesetXml.matchAll(tileRe)) {
+    const localId = Number(tileMatch[1]);
+    const frameRe = /<frame tileid="(\d+)" duration="(\d+)"\s*\/>/g;
+    const frames = [];
+    const durations = new Set();
+    for (const frameMatch of tileMatch[2].matchAll(frameRe)) {
+      frames.push(Number(frameMatch[1]));
+      durations.add(frameMatch[2]);
+    }
+    if (frames.length === 0) {
+      continue;
+    }
+    if (durations.size > 1) {
+      throw new Error(
+        `Tile ${localId}'s animation has mixed frame durations (${[...durations].join(", ")}ms) - the importer assumes one uniform duration per animation, update parseAnimations() to support this.`,
+      );
+    }
+    animations[localId] = { frames, frameDurationMs: Number([...durations][0]) };
+  }
+  return animations;
+};
+
 for (const m of content.matchAll(tilesetRe)) {
   tilesets.push({
     firstGid: Number(m[1]),
@@ -66,6 +110,7 @@ for (const m of content.matchAll(tilesetRe)) {
     imageFile: m[4],
     imageWidth: Number(m[5]),
     imageHeight: Number(m[6]),
+    animations: parseAnimations(m[7]),
   });
 }
 if (tilesets.length === 0) {
@@ -95,18 +140,14 @@ if (layers.length === 0) {
   throw new Error("No <layer> entries found in the map.");
 }
 
-// Tiled encodes horizontal/vertical/diagonal flip as the top 3 bits of the GID.
-const FLIP_MASK = 0x1fffffff;
-const stripFlip = (gid) => gid & FLIP_MASK;
-
 const cropLayer = (gids) => {
   const cropped = new Array(CROP_WIDTH * CROP_HEIGHT);
   for (let row = 0; row < CROP_HEIGHT; row++) {
     for (let col = 0; col < CROP_WIDTH; col++) {
       const sourceCol = CROP_ORIGIN_COL + col;
       const sourceRow = CROP_ORIGIN_ROW + row;
-      const gid = gids[sourceRow * mapWidth + sourceCol];
-      cropped[row * CROP_WIDTH + col] = stripFlip(gid);
+      // Kept as the raw GID, flip bits and all - see the file header.
+      cropped[row * CROP_WIDTH + col] = gids[sourceRow * mapWidth + sourceCol];
     }
   }
   return cropped;
@@ -154,10 +195,22 @@ const layersTs = croppedLayers
   })
   .join("\n");
 
+const animationsTs = (animations) => {
+  const entries = Object.entries(animations);
+  if (entries.length === 0) {
+    return "{}";
+  }
+  const lines = entries.map(
+    ([localId, a]) =>
+      `      ${localId}: { frames: [${a.frames.join(",")}], frameDurationMs: ${a.frameDurationMs} },`,
+  );
+  return `{\n${lines.join("\n")}\n    }`;
+};
+
 const tilesetsTs = tilesets
   .map(
     (t) =>
-      `  { name: "${t.name}", firstGid: ${t.firstGid}, columns: ${t.columns}, imageWidth: ${t.imageWidth}, imageHeight: ${t.imageHeight} },`,
+      `  { name: "${t.name}", firstGid: ${t.firstGid}, columns: ${t.columns}, imageWidth: ${t.imageWidth}, imageHeight: ${t.imageHeight}, animations: ${animationsTs(t.animations)} },`,
   )
   .join("\n");
 
@@ -174,12 +227,21 @@ export const VILLAGE_TILE = ${TILE};
 export const VILLAGE_COLUMNS = ${CROP_WIDTH};
 export const VILLAGE_ROWS = ${CROP_HEIGHT};
 
+export type VillageTileAnimation = {
+  /** Local tile ids (within this tileset) to cycle through, in order. */
+  frames: number[];
+  /** How long each frame shows, in ms - uniform across all frames (see parseAnimations() in the importer). */
+  frameDurationMs: number;
+};
+
 export type VillageTilesetInfo = {
   name: string;
   firstGid: number;
   columns: number;
   imageWidth: number;
   imageHeight: number;
+  /** Keyed by the animated tile's own local id (within this tileset). */
+  animations: Record<number, VillageTileAnimation>;
 };
 
 /** Sorted by firstGid ascending. */
@@ -191,7 +253,8 @@ export type VillageLayer = {
   name: string;
   /**
    * Flat GID array, row-major, length VILLAGE_COLUMNS * VILLAGE_ROWS.
-   * 0 = empty. Flip flags already stripped.
+   * 0 = empty. Raw GIDs - Tiled's flip/rotate bits (top 3 bits) are still
+   * set where used; villageLayout.ts decodes them per-cell.
    */
   gids: number[];
 };

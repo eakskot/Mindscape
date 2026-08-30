@@ -4,6 +4,10 @@
     ],
     "file.lastUsedOpenFilter": "Alle Filer (*)",
     "fileStates": {
+        "": {
+            "scaleInDock": 0.7098,
+            "scaleInEditor": 1
+        },
         "#Houses_TILESET_B-C-D-E": {
             "scaleInDock": 0.7356
         },
@@ -13,11 +17,31 @@
         "#Terrains_TILESET_B-C-D-E": {
             "scaleInDock": 0.7489
         },
+        "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps/map.tmx": {
+            "expandedGroupLayers": [
+                9
+            ],
+            "scale": 0.3411,
+            "selectedLayer": 1,
+            "viewCenter": {
+                "x": 982.1166813251245,
+                "y": 642.0404573438874
+            }
+        },
+        "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps/map.tmx#Houses_TILESET_B-C-D-E": {
+            "scaleInDock": 0.7098
+        },
+        "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps/map.tmx#Outside_Stuff_TILESET_B-C-D-E": {
+            "scaleInDock": 0.9177
+        },
+        "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps/map.tmx#Terrains_TILESET_B-C-D-E": {
+            "scaleInDock": 1.1132
+        },
         "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps/testmap.tmx": {
             "scale": 1.1642,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 274.8668613640268,
+                "x": 356.4679608314723,
                 "y": 153.75365057550255
             }
         },
@@ -28,6 +52,7 @@
             "scaleInDock": 1
         }
     },
+    "frame.defaultDuration": 250,
     "last.externalTilesetPath": "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps",
     "last.imagePath": "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps",
     "map.height": 80,

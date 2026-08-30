@@ -10,6 +10,7 @@ import {
 import { useDerivedValue, type SharedValue } from "react-native-reanimated";
 
 import { PIXEL_ART } from "../atlas";
+import { toScreenPoint } from "../entitySprite";
 import {
   ITEM_CATALOG,
   type ItemDefinition,
@@ -32,38 +33,71 @@ import type { ItemImages } from "./itemImages";
  *
  * Only one copy of an item is ever visible, and no React render is needed when
  * the character walks past something.
+ *
+ * Items draw at their own `entityScale` - the same one the character uses
+ * (see entitySprite.ts) - not the world's `worldScale`, so furniture reads as
+ * consistent with the character regardless of how zoomed out the camera is.
  */
 export type LayerPass = "behind" | "front" | "always";
+
+type EntityProps = {
+  camera: SharedValue<{ x: number; y: number }>;
+  worldScale: number;
+  entityScale: number;
+  /** Device pixels per RN point - see entitySprite.ts's toScreenPoint. */
+  density: number;
+};
 
 const StaticSprite = ({
   definition,
   item,
   image,
+  camera,
+  worldScale,
+  entityScale,
+  density,
 }: {
   definition: ItemDefinition;
   item: PlacedItem;
   image: SkImage | null;
-}) => (
-  <Image
-    image={image}
-    x={item.x}
-    y={item.y}
-    width={definition.width}
-    height={definition.height}
-    sampling={PIXEL_ART}
-  />
-);
+} & EntityProps) => {
+  const transform = useDerivedValue(() => {
+    const point = toScreenPoint(item.x, item.y, camera.value, worldScale, density);
+    return [
+      { translateX: point.x },
+      { translateY: point.y },
+      { scale: entityScale },
+    ];
+  });
+
+  return (
+    <Group transform={transform}>
+      <Image
+        image={image}
+        x={0}
+        y={0}
+        width={definition.width}
+        height={definition.height}
+        sampling={PIXEL_ART}
+      />
+    </Group>
+  );
+};
 
 /** Items whose sprite is a horizontal strip of frames (fireplace, TV, fountain). */
 const AnimatedSprite = ({
   definition,
   item,
   image,
+  camera,
+  worldScale,
+  entityScale,
+  density,
 }: {
   definition: ItemDefinition;
   item: PlacedItem;
   image: SkImage | null;
-}) => {
+} & EntityProps) => {
   const { frames, fps } = definition.animation!;
   const clock = useClock();
 
@@ -79,7 +113,8 @@ const AnimatedSprite = ({
   });
   const transforms = useRSXformBuffer(1, (xform) => {
     "worklet";
-    xform.set(1, 0, item.x, item.y);
+    const point = toScreenPoint(item.x, item.y, camera.value, worldScale, density);
+    xform.set(entityScale, 0, point.x, point.y);
   });
 
   return (
@@ -97,12 +132,16 @@ const PlacedItemSprite = ({
   image,
   pass,
   characterY,
+  camera,
+  worldScale,
+  entityScale,
+  density,
 }: {
   item: PlacedItem;
   image: SkImage | null;
   pass: LayerPass;
   characterY: SharedValue<number>;
-}) => {
+} & EntityProps) => {
   const definition = ITEM_CATALOG[item.itemId];
   const baseline = baselineOf(item);
 
@@ -119,9 +158,25 @@ const PlacedItemSprite = ({
   return (
     <Group opacity={opacity}>
       {definition.animation ? (
-        <AnimatedSprite definition={definition} item={item} image={image} />
+        <AnimatedSprite
+          definition={definition}
+          item={item}
+          image={image}
+          camera={camera}
+          worldScale={worldScale}
+          entityScale={entityScale}
+          density={density}
+        />
       ) : (
-        <StaticSprite definition={definition} item={item} image={image} />
+        <StaticSprite
+          definition={definition}
+          item={item}
+          image={image}
+          camera={camera}
+          worldScale={worldScale}
+          entityScale={entityScale}
+          density={density}
+        />
       )}
     </Group>
   );
@@ -134,7 +189,7 @@ type ItemLayerProps = {
   /** Which catalog layer to draw. */
   layer: LayerName;
   pass: LayerPass;
-};
+} & EntityProps;
 
 export const ItemLayer = ({
   items,
@@ -142,6 +197,10 @@ export const ItemLayer = ({
   characterY,
   layer,
   pass,
+  camera,
+  worldScale,
+  entityScale,
+  density,
 }: ItemLayerProps) => (
   <>
     {items
@@ -155,6 +214,10 @@ export const ItemLayer = ({
           image={images[item.itemId]}
           pass={pass}
           characterY={characterY}
+          camera={camera}
+          worldScale={worldScale}
+          entityScale={entityScale}
+          density={density}
         />
       ))}
   </>

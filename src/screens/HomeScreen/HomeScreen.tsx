@@ -1,7 +1,8 @@
 import { Canvas, Group } from "@shopify/react-native-skia";
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState, type ComponentType } from "react";
 import {
   PanResponder,
+  PixelRatio,
   StyleSheet,
   View,
   useWindowDimensions,
@@ -14,35 +15,51 @@ import { DevInventory } from "../../game/items/DevInventory";
 import { ItemLayer } from "../../game/items/ItemLayer";
 import { useItemImages } from "../../game/items/itemImages";
 import { useWorldItems } from "../../game/items/useWorldItems";
+import { usePortalWatcher } from "../../game/portals";
+import { Room } from "../../game/Room";
+import { ROOM } from "../../game/roomLayout";
+import type { Portal, Scene, SceneId } from "../../game/scene";
 import { useCharacter } from "../../game/useCharacter";
 import { Village } from "../../game/Village";
-import {
-  VILLAGE,
-  VILLAGE_HEIGHT,
-  VILLAGE_TILE,
-  VILLAGE_TILES_VISIBLE_TALL,
-  VILLAGE_WIDTH,
-} from "../../game/village/villageLayout";
-
-// The character currently lives in the village (see Village.tsx /
-// villageLayout.ts). The room (Room.tsx / roomLayout.ts / roomConfig.ts) is
-// untouched and unused for now - it is meant to be re-entered later through
-// a door into the house.
+import { VILLAGE } from "../../game/village/villageLayout";
 
 /**
- * How much bigger than strict tile-proportion the character is drawn.
- * Independent of the world's own zoom, so the world can show more
- * surroundings without shrinking the character to match. Confirmed against
- * a live scale=20 test that the mechanism scales correctly and
- * proportionally before picking this value - see Character.tsx.
+ * Which component draws each scene's tiles. The scene *data* lives with the
+ * scene itself (villageLayout.ts / roomLayout.ts) - this table only says
+ * what to render for a given id, so HomeScreen never hardcodes "village".
  */
-const CHARACTER_SCALE_MULTIPLIER = 2;
+const SCENES: Record<SceneId, { scene: Scene; Component: ComponentType }> = {
+  village: { scene: VILLAGE, Component: Village },
+  room: { scene: ROOM, Component: Room },
+};
+
+/**
+ * How much bigger than strict tile-proportion the character and placed items
+ * are drawn - the same number for both, so furniture reads as consistent
+ * with the character rather than shrinking relative to it. Independent of
+ * the world's own zoom, so the world can show more surroundings without
+ * shrinking everything drawn in it to match. Confirmed against a live
+ * scale=20 test that the mechanism scales correctly and proportionally
+ * before picking this value - see entitySprite.ts.
+ */
+const ENTITY_SCALE_MULTIPLIER = 2;
 
 /**
  * Where the camera should sit so `charX,charY` (room pixels) lands in the
- * middle of the screen, clamped so it never shows past the scene's edge.
- * Scene-agnostic - takes the active scene's own pixel size as a parameter
- * rather than assuming which scene is active.
+ * middle of the screen. Two cases: a scene bigger than the viewport (the
+ * village) follows the character, clamped so it never shows past the
+ * scene's edge; a scene smaller than the viewport (the room) is simply
+ * centred - following the character there would do nothing but the naive
+ * clamp (min==max==0) would pin it to a corner instead of the middle.
+ *
+ * Rounded to a whole screen pixel before returning. Every tile's own
+ * position is already an exact multiple of the (integer) world scale, so an
+ * integer camera offset lands every tile on a whole pixel too - a
+ * fractional one (charX/charY move continuously while walking) would
+ * otherwise place adjacent tiles a hair apart on some frames, letting the
+ * canvas's own background colour show through as a thin seam. This is the
+ * standard tilemap-seam fix ("camera pixel snapping"), the translation
+ * counterpart to the "integer scale only" rule above.
  */
 const cameraOffset = (
   charX: number,
@@ -52,45 +69,117 @@ const cameraOffset = (
   height: number,
   sceneWidth: number,
   sceneHeight: number,
+  /**
+   * Device pixels per RN point (3 on this iPhone) - snapping to the nearest
+   * *point* was 3x coarser than the screen's actual pixel grid, since a
+   * point is 3 real device pixels here. Skia still rasterises to real
+   * device pixels regardless of what unit our own math uses, so rounding
+   * to the nearest 1/density point is the coarsest grid that stays exactly
+   * on a device pixel - anything coarser (whole points) was needlessly
+   * chunky motion, anything finer (unrounded) is what caused the seams
+   * in the first place.
+   */
+  density: number,
 ) => {
   "worklet";
-  const minOffsetX = Math.min(0, width - sceneWidth * scale);
-  const minOffsetY = Math.min(0, height - sceneHeight * scale);
+  const sceneWidthPx = sceneWidth * scale;
+  const sceneHeightPx = sceneHeight * scale;
+  const x =
+    sceneWidthPx <= width
+      ? (width - sceneWidthPx) / 2
+      : clamp(width / 2 - charX * scale, width - sceneWidthPx, 0);
+  const y =
+    sceneHeightPx <= height
+      ? (height - sceneHeightPx) / 2
+      : clamp(height / 2 - charY * scale, height - sceneHeightPx, 0);
   return {
-    x: clamp(width / 2 - charX * scale, minOffsetX, 0),
-    y: clamp(height / 2 - charY * scale, minOffsetY, 0),
+    x: Math.round(x * density) / density,
+    y: Math.round(y * density) / density,
   };
 };
 
+type SceneState = { sceneId: SceneId; spawn: { x: number; y: number } };
+
+/**
+ * Holds which scene is active. Switching scenes remounts `SceneStage` (keyed
+ * by `sceneId`) instead of trying to "teleport" a live character across
+ * scenes - `walkable`/`tileCollision`/`bounds` are plain values closed over
+ * by useCharacter/useWorldItems at mount time today, not shared values, so a
+ * remount gets a scene's data right by construction instead of risking a
+ * frame that mixes one scene's bounds with another's collision grid.
+ *
+ * Trade-off, stated plainly: placed items don't carry across a scene switch
+ * within the session, since each mount gets a fresh useWorldItems. That's
+ * acceptable for now - nothing is persisted across app restarts either, the
+ * item system has no storage wired up yet regardless.
+ */
 export default function HomeScreen() {
+  const [sceneState, setSceneState] = useState<SceneState>(() => ({
+    sceneId: "village",
+    spawn: VILLAGE.start,
+  }));
+
+  const handlePortal = useCallback((portal: Portal) => {
+    setSceneState({ sceneId: portal.targetScene, spawn: portal.targetSpawn });
+  }, []);
+
+  return (
+    <SceneStage
+      key={sceneState.sceneId}
+      sceneId={sceneState.sceneId}
+      spawn={sceneState.spawn}
+      onPortal={handlePortal}
+    />
+  );
+}
+
+function SceneStage({
+  sceneId,
+  spawn,
+  onPortal,
+}: {
+  sceneId: SceneId;
+  spawn: { x: number; y: number };
+  onPortal: (portal: Portal) => void;
+}) {
   const { width, height } = useWindowDimensions();
-  const world = useWorldItems(VILLAGE.bounds);
-  const { x, y, column, row, walkTo } = useCharacter(
+  const { scene, Component: SceneComponent } = SCENES[sceneId];
+
+  const world = useWorldItems(scene.bounds);
+  const { x, y, column, row, walkTo, controlled } = useCharacter(
     world.obstacles,
-    VILLAGE.walkable,
-    VILLAGE.start,
-    VILLAGE.tileCollision,
+    scene.walkable,
+    spawn,
+    scene.tileCollision,
   );
   const images = useItemImages();
   const [deleteMode, setDeleteMode] = useState(false);
 
-  // A camera-follow scale for the world (tiles, items): how many screen
-  // pixels one room pixel maps to. Kept separate from the character's own
-  // scale below - see CHARACTER_SCALE_MULTIPLIER.
+  // Walking into a door switches scenes - see portals.ts. Lives here, not in
+  // useCharacter, because it's a HomeScreen-level concern layered on top of
+  // the character's position, not something the movement engine needs to
+  // know about. Only fires for a player-directed walkTo, not idle wandering
+  // - see useCharacter's `controlled`.
+  usePortalWatcher(x, y, controlled, scene.portals, onPortal);
+
+  // A camera-follow scale for the world (tiles only): how many screen
+  // pixels one room pixel maps to. Kept separate from the entity scale below
+  // - see ENTITY_SCALE_MULTIPLIER.
   const scale = Math.max(
     1,
-    Math.floor(height / (VILLAGE_TILE * VILLAGE_TILES_VISIBLE_TALL)),
+    Math.floor(height / (scene.tileSize * scene.preferredTilesVisibleTall)),
   );
-  const characterScale = scale * CHARACTER_SCALE_MULTIPLIER;
+  const entityScale = scale * ENTITY_SCALE_MULTIPLIER;
 
   // The camera follows the character every frame on the UI thread - it must
   // not touch React, same rule as the character's own movement. Exposed as
   // its own shared value (not just baked into `transform` below) so the
-  // character - which draws outside the world's Group to get its own scale -
-  // can read the same live camera position, computed once per frame rather
-  // than once per axis.
+  // character and items - which draw outside the world's Group to get their
+  // own scale - can read the same live camera position, computed once per
+  // frame rather than once per axis.
+  const density = PixelRatio.get();
   const camera = useDerivedValue(() =>
-    cameraOffset(x.value, y.value, scale, width, height, VILLAGE_WIDTH, VILLAGE_HEIGHT),
+    cameraOffset(x.value, y.value, scale, width, height, scene.width, scene.height, density),
   );
   const transform = useDerivedValue(() => [
     { translateX: camera.value.x },
@@ -103,8 +192,7 @@ export default function HomeScreen() {
   // item mid-drag cannot replace the active responder and touches always
   // convert through the camera's current position, not a stale one from
   // mount. `scale` only changes on a real resize/rotation (a React render),
-  // so a plain ref is enough - no need for the object wrapper cameraX/cameraY
-  // used to need.
+  // so a plain ref is enough.
   const scaleRef = useRef(scale);
   scaleRef.current = scale;
   const worldRef = useRef(world);
@@ -198,33 +286,41 @@ export default function HomeScreen() {
     <View style={styles.container} {...responder.panHandlers}>
       <Canvas style={StyleSheet.absoluteFill}>
         {/*
-          Character sits between two Groups sharing the same `transform`
-          instead of nested inside one, because it carries its own
-          `characterScale` (see Character.tsx) rather than the world's
-          `scale` - nesting it would compose a fractional inner scale with
-          the outer one, which risks uneven pixel sampling (see the
-          "Integer scale only" rule in roomLayout.ts). Splitting the Group
-          keeps every scale factor a clean whole number while preserving the
-          same floorDecal / behind / character / front / overhead paint
-          order the item y-sort relies on.
+          Only the tile layers sit inside the world-scaled Group. The
+          character and every item draw at their own `entityScale` (see
+          entitySprite.ts) instead of nesting inside this Group's `scale` -
+          nesting would compose a fractional inner scale with the outer one,
+          which risks uneven pixel sampling (see "Integer scale only" in
+          roomLayout.ts). They stay in the same floorDecal / behind /
+          character / front / overhead paint order the item y-sort relies on
+          - that order comes from where each element sits in this JSX, not
+          from which Group (if any) it's nested in.
         */}
         <Group transform={transform}>
-          <Village />
-          <ItemLayer
-            items={world.items}
-            images={images}
-            characterY={y}
-            layer="floorDecal"
-            pass="always"
-          />
-          <ItemLayer
-            items={world.items}
-            images={images}
-            characterY={y}
-            layer="object"
-            pass="behind"
-          />
+          <SceneComponent />
         </Group>
+        <ItemLayer
+          items={world.items}
+          images={images}
+          characterY={y}
+          layer="floorDecal"
+          pass="always"
+          camera={camera}
+          worldScale={scale}
+          entityScale={entityScale}
+          density={density}
+        />
+        <ItemLayer
+          items={world.items}
+          images={images}
+          characterY={y}
+          layer="object"
+          pass="behind"
+          camera={camera}
+          worldScale={scale}
+          entityScale={entityScale}
+          density={density}
+        />
         <Character
           x={x}
           y={y}
@@ -232,24 +328,31 @@ export default function HomeScreen() {
           row={row}
           camera={camera}
           worldScale={scale}
-          characterScale={characterScale}
+          entityScale={entityScale}
+          density={density}
         />
-        <Group transform={transform}>
-          <ItemLayer
-            items={world.items}
-            images={images}
-            characterY={y}
-            layer="object"
-            pass="front"
-          />
-          <ItemLayer
-            items={world.items}
-            images={images}
-            characterY={y}
-            layer="overhead"
-            pass="always"
-          />
-        </Group>
+        <ItemLayer
+          items={world.items}
+          images={images}
+          characterY={y}
+          layer="object"
+          pass="front"
+          camera={camera}
+          worldScale={scale}
+          entityScale={entityScale}
+          density={density}
+        />
+        <ItemLayer
+          items={world.items}
+          images={images}
+          characterY={y}
+          layer="overhead"
+          pass="always"
+          camera={camera}
+          worldScale={scale}
+          entityScale={entityScale}
+          density={density}
+        />
       </Canvas>
 
       <DevInventory

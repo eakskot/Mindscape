@@ -134,7 +134,11 @@ for (const m of content.matchAll(layerRe)) {
       `Layer "${name}": expected ${mapWidth * mapHeight} cells, got ${gids.length}`,
     );
   }
-  layers.push({ name, gids });
+  // The map's own authoring convention: a layer named "*_collision" both
+  // draws and blocks movement (see villageLayout.ts). Decided here, once,
+  // at the point that already knows this convention, rather than having
+  // every consumer re-derive it by pattern-matching the layer's name.
+  layers.push({ name, gids, collision: name.endsWith("_collision") });
 }
 if (layers.length === 0) {
   throw new Error("No <layer> entries found in the map.");
@@ -179,6 +183,7 @@ for (const tileset of tilesets) {
 
 const croppedLayers = layers.map((layer) => ({
   name: layer.name,
+  collision: layer.collision,
   gids: cropLayer(layer.gids),
 }));
 
@@ -191,7 +196,7 @@ const layersTs = croppedLayers
     for (let row = 0; row < CROP_HEIGHT; row++) {
       rows.push(`      ${formatGidRow(layer.gids, row)},`);
     }
-    return `  {\n    name: "${layer.name}",\n    gids: [\n${rows.join("\n")}\n    ],\n  },`;
+    return `  {\n    name: "${layer.name}",\n    collision: ${layer.collision},\n    gids: [\n${rows.join("\n")}\n    ],\n  },`;
   })
   .join("\n");
 
@@ -251,6 +256,13 @@ ${tilesetsTs}
 
 export type VillageLayer = {
   name: string;
+  /**
+   * Whether this layer both draws and blocks movement - true for every
+   * layer whose Tiled name ends in "_collision", decided here (the one
+   * place that knows that authoring convention) rather than re-derived by
+   * every consumer pattern-matching \`name\` itself.
+   */
+  collision: boolean;
   /**
    * Flat GID array, row-major, length VILLAGE_COLUMNS * VILLAGE_ROWS.
    * 0 = empty. Raw GIDs - Tiled's flip/rotate bits (top 3 bits) are still

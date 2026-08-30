@@ -115,6 +115,22 @@ export const useCharacter = (
     return true;
   };
 
+  /**
+   * Point the character at a new target and reset the progress watchdog -
+   * every place that changes where the character is heading needs all four
+   * of these kept in sync, so it's one worklet instead of three copies of
+   * the same four assignments (used from both UI-thread worklets below and
+   * the JS-thread `walkTo` callback - worklets run on either).
+   */
+  const setTarget = (nextX: number, nextY: number, isControlled: boolean) => {
+    "worklet";
+    targetX.value = nextX;
+    targetY.value = nextY;
+    bestDistance.value = Infinity;
+    stuckFor.value = 0;
+    controlled.value = isControlled;
+  };
+
   const pickTarget = () => {
     "worklet";
     // A few tries, so a target rarely lands inside furniture.
@@ -124,11 +140,7 @@ export const useCharacter = (
       const nextY =
         walkable.minY + Math.random() * (walkable.maxY - walkable.minY);
       if (isFree(nextX, nextY)) {
-        targetX.value = nextX;
-        targetY.value = nextY;
-        bestDistance.value = Infinity;
-        stuckFor.value = 0;
-        controlled.value = false;
+        setTarget(nextX, nextY, false);
         return;
       }
     }
@@ -137,11 +149,7 @@ export const useCharacter = (
   /** Stop chasing the current target: the idle branch takes over next frame. */
   const abandonTarget = () => {
     "worklet";
-    targetX.value = x.value;
-    targetY.value = y.value;
-    bestDistance.value = Infinity;
-    stuckFor.value = 0;
-    controlled.value = false;
+    setTarget(x.value, y.value, false);
   };
 
   useFrameCallback((frameInfo) => {
@@ -230,11 +238,11 @@ export const useCharacter = (
 
   const walkTo = useCallback(
     (roomX: number, roomY: number) => {
-      targetX.value = clamp(roomX, walkable.minX, walkable.maxX);
-      targetY.value = clamp(roomY, walkable.minY, walkable.maxY);
-      bestDistance.value = Infinity;
-      stuckFor.value = 0;
-      controlled.value = true;
+      setTarget(
+        clamp(roomX, walkable.minX, walkable.maxX),
+        clamp(roomY, walkable.minY, walkable.maxY),
+        true,
+      );
     },
     [targetX, targetY, bestDistance, stuckFor, controlled, walkable],
   );

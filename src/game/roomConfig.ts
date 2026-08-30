@@ -1,5 +1,3 @@
-import { FLOOR_TILESET, WALL_TILESET, styleCount } from "./tilesets";
-
 /**
  * The one place the room is described. Change `floorStyle` / `wallStyle` to
  * restyle the room - no renderer code needs to know about it.
@@ -26,6 +24,3 @@ export const ROOM_CONFIG: RoomConfig = {
   floorStyle: 9, // warm wooden planks
   wallStyle: 39, // light wallpaper with diamonds
 };
-
-export const FLOOR_STYLE_COUNT = styleCount(FLOOR_TILESET);
-export const WALL_STYLE_COUNT = styleCount(WALL_TILESET);

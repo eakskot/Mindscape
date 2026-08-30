@@ -5,9 +5,11 @@
  * A placed item is `{ instanceId, itemId, x, y }` and nothing else, so the whole
  * room is JSON-serialisable - that is what `serialize` / `restore` are for when
  * we add saving. The same hook works for an outdoor scene - it only needs
- * `bounds` (where items may be placed) and, optionally, `staticObstacles`
- * (fixed collision, e.g. the village's imported tile collision, that items
- * add on top of rather than replace).
+ * `bounds` (where items may be placed) and `tileSize` (the scene's own grid
+ * unit, for snap-to-grid placement). A scene's own terrain collision (e.g.
+ * the village's imported tile grid) is a separate mechanism entirely - see
+ * useCharacter.ts's `tileCollision` - since it is dense enough that a flat
+ * grid lookup beats folding it into this hook's per-item `Rect[]`.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -15,7 +17,6 @@ import { useSharedValue } from "react-native-reanimated";
 
 import type { Bounds } from "../bounds";
 import { clamp } from "../bounds";
-import { TILE } from "../tilesets";
 import { ITEM_CATALOG, type ItemId, type Rect } from "./itemCatalog";
 
 export type PlacedItem = {
@@ -25,8 +26,6 @@ export type PlacedItem = {
   x: number;
   y: number;
 };
-
-const snap = (value: number) => Math.round(value / TILE) * TILE;
 
 /** The floor rect an item occupies, in room pixels. */
 export const collisionRect = (item: PlacedItem): Rect => {
@@ -56,26 +55,23 @@ export const hitTest = (item: PlacedItem, roomX: number, roomY: number) => {
   );
 };
 
-export const useWorldItems = (bounds: Bounds, staticObstacles: Rect[] = []) => {
+export const useWorldItems = (bounds: Bounds, tileSize: number) => {
   const [items, setItems] = useState<PlacedItem[]>([]);
   const nextId = useRef(1);
+  const snap = useCallback(
+    (value: number) => Math.round(value / tileSize) * tileSize,
+    [tileSize],
+  );
 
   /**
    * Collision rects, mirrored into a shared value so the character's movement
-   * worklet can read them without crossing to the JS thread. Static
-   * obstacles (e.g. imported tile collision) sit underneath the item
-   * footprints, which change as items are placed, moved and removed.
+   * worklet can read them without crossing to the JS thread.
    */
-  const obstacles = useSharedValue<Rect[]>(staticObstacles);
+  const obstacles = useSharedValue<Rect[]>([]);
   useEffect(() => {
-    obstacles.value = [
-      ...staticObstacles,
-      ...items
-        .filter((item) => ITEM_CATALOG[item.itemId].solid)
-        .map(collisionRect),
-    ];
-    // staticObstacles is scene data (room vs village) that does not change
-    // once mounted - only `items` actually varies from here.
+    obstacles.value = items
+      .filter((item) => ITEM_CATALOG[item.itemId].solid)
+      .map(collisionRect);
   }, [items, obstacles]);
 
   const placeItem = useCallback(
@@ -83,7 +79,7 @@ export const useWorldItems = (bounds: Bounds, staticObstacles: Rect[] = []) => {
       const definition = ITEM_CATALOG[itemId];
       setItems((current) => {
         // Drop new items near the middle, nudged so a stack of them stays visible.
-        const nudge = (current.length % 4) * TILE;
+        const nudge = (current.length % 4) * tileSize;
         const centerX = (bounds.minX + bounds.maxX) / 2;
         const centerY = (bounds.minY + bounds.maxY) / 2;
         const x = snap(
@@ -106,7 +102,7 @@ export const useWorldItems = (bounds: Bounds, staticObstacles: Rect[] = []) => {
         ];
       });
     },
-    [bounds],
+    [bounds, tileSize, snap],
   );
 
   const moveItem = useCallback(
@@ -127,7 +123,7 @@ export const useWorldItems = (bounds: Bounds, staticObstacles: Rect[] = []) => {
         }),
       );
     },
-    [bounds],
+    [bounds, snap],
   );
 
   const removeItem = useCallback((instanceId: string) => {

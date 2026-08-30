@@ -9,6 +9,7 @@
 import {
   runOnJS,
   useAnimatedReaction,
+  useSharedValue,
   type SharedValue,
 } from "react-native-reanimated";
 
@@ -30,6 +31,13 @@ export const usePortalWatcher = (
   portals: Portal[],
   onEnter: (portal: Portal) => void,
 ) => {
+  // Whether the reaction below has evaluated at least once yet. Owned here
+  // explicitly rather than inferred from Reanimated's own "previousIndex is
+  // null on the first call" behaviour - that's real, observed behaviour,
+  // but not a documented contract this file should have to keep depending
+  // on getting right.
+  const hasSettled = useSharedValue(false);
+
   useAnimatedReaction(
     // Which portal (if any) the character is standing inside - position
     // only, independent of `controlled`. A scene's arrival spawn commonly
@@ -48,21 +56,15 @@ export const usePortalWatcher = (
     // selector, so idle wandering into a trigger doesn't enter it, but a
     // deliberate walkTo crossing into one does.
     (index, previousIndex) => {
-      // `previousIndex` is `null` on this reaction's very first evaluation
-      // after mount, which trivially differs from any real `index` - so a
-      // scene arriving with the character already standing inside a
-      // trigger, with `controlled` turning true before that first
-      // evaluation runs (a human can't tap fast enough to hit this, but a
-      // scripted walkTo can fire close enough to a fresh mount to race it),
-      // must not read as a crossing. Excluding `previousIndex === null`
-      // means only a *second-or-later* evaluation - i.e. an actual measured
-      // change in position - can ever fire onEnter.
-      if (
-        index !== -1 &&
-        index !== previousIndex &&
-        previousIndex !== null &&
-        controlled.value
-      ) {
+      if (!hasSettled.value) {
+        // This call just establishes a baseline, even if the character
+        // already happens to be standing inside a trigger right now (see
+        // the scene-arrival note above) - never a real crossing, since
+        // nothing has been observed to compare against yet.
+        hasSettled.value = true;
+        return;
+      }
+      if (index !== -1 && index !== previousIndex && controlled.value) {
         runOnJS(onEnter)(portals[index]);
       }
     },

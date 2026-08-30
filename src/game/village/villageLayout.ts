@@ -123,7 +123,7 @@ const buildVillageLayout = (): Scene => {
 
   for (const layer of VILLAGE_LAYERS) {
     const tilesByTileset: Tile[][] = VILLAGE_TILESETS.map(() => []);
-    const isCollisionLayer = layer.name.endsWith("_collision");
+    const isCollisionLayer = layer.collision;
 
     for (let row = 0; row < VILLAGE_ROWS; row++) {
       for (let column = 0; column < VILLAGE_COLUMNS; column++) {

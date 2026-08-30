@@ -132,10 +132,7 @@ const PlacedItemSprite = ({
   image,
   pass,
   characterY,
-  camera,
-  worldScale,
-  entityScale,
-  density,
+  ...entityProps
 }: {
   item: PlacedItem;
   image: SkImage | null;
@@ -162,20 +159,14 @@ const PlacedItemSprite = ({
           definition={definition}
           item={item}
           image={image}
-          camera={camera}
-          worldScale={worldScale}
-          entityScale={entityScale}
-          density={density}
+          {...entityProps}
         />
       ) : (
         <StaticSprite
           definition={definition}
           item={item}
           image={image}
-          camera={camera}
-          worldScale={worldScale}
-          entityScale={entityScale}
-          density={density}
+          {...entityProps}
         />
       )}
     </Group>
@@ -197,10 +188,7 @@ export const ItemLayer = ({
   characterY,
   layer,
   pass,
-  camera,
-  worldScale,
-  entityScale,
-  density,
+  ...entityProps
 }: ItemLayerProps) => (
   <>
     {items
@@ -214,10 +202,7 @@ export const ItemLayer = ({
           image={images[item.itemId]}
           pass={pass}
           characterY={characterY}
-          camera={camera}
-          worldScale={worldScale}
-          entityScale={entityScale}
-          density={density}
+          {...entityProps}
         />
       ))}
   </>

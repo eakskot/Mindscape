@@ -62,6 +62,12 @@ export type Clip = {
  *
  * Animations the pack only ships for one or two directions reuse the same frames
  * for the missing directions.
+ *
+ * `sleep`/`phone`/`book`/`sit` are not reachable yet - useCharacter.ts only ever
+ * sets `idle` or `walk` today, nothing drives an activity system. Kept measured
+ * and ready-to-use on purpose (see "Verify before writing code" - re-deriving
+ * this geometry later would mean re-measuring the sheet from scratch), not left
+ * over from parsing more of the sheet than turned out to be needed.
  */
 export const CHARACTER_ANIMATIONS: Record<AnimationName, Clip> = {
   idle: {

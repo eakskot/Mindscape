@@ -11,6 +11,7 @@ import { useDerivedValue } from "react-native-reanimated";
 
 import { clamp } from "../../game/bounds";
 import { Character } from "../../game/Character";
+import { snapToDevicePixel } from "../../game/entitySprite";
 import { DevInventory } from "../../game/items/DevInventory";
 import { ItemLayer } from "../../game/items/ItemLayer";
 import { useItemImages } from "../../game/items/itemImages";
@@ -52,14 +53,15 @@ const ENTITY_SCALE_MULTIPLIER = 2;
  * centred - following the character there would do nothing but the naive
  * clamp (min==max==0) would pin it to a corner instead of the middle.
  *
- * Rounded to a whole screen pixel before returning. Every tile's own
- * position is already an exact multiple of the (integer) world scale, so an
- * integer camera offset lands every tile on a whole pixel too - a
- * fractional one (charX/charY move continuously while walking) would
- * otherwise place adjacent tiles a hair apart on some frames, letting the
- * canvas's own background colour show through as a thin seam. This is the
- * standard tilemap-seam fix ("camera pixel snapping"), the translation
- * counterpart to the "integer scale only" rule above.
+ * Snapped to the device-pixel grid before returning (see entitySprite.ts's
+ * `snapToDevicePixel`). Every tile's own position is already an exact
+ * multiple of the (integer) world scale, so a snapped camera offset lands
+ * every tile on a whole pixel too - an unsnapped one (charX/charY move
+ * continuously while walking) would otherwise place adjacent tiles a hair
+ * apart on some frames, letting the canvas's own background colour show
+ * through as a thin seam. This is the standard tilemap-seam fix ("camera
+ * pixel snapping"), the translation counterpart to the "integer scale only"
+ * rule above.
  */
 const cameraOffset = (
   charX: number,
@@ -93,8 +95,8 @@ const cameraOffset = (
       ? (height - sceneHeightPx) / 2
       : clamp(height / 2 - charY * scale, height - sceneHeightPx, 0);
   return {
-    x: Math.round(x * density) / density,
-    y: Math.round(y * density) / density,
+    x: snapToDevicePixel(x, density),
+    y: snapToDevicePixel(y, density),
   };
 };
 
@@ -145,7 +147,7 @@ function SceneStage({
   const { width, height } = useWindowDimensions();
   const { scene, Component: SceneComponent } = SCENES[sceneId];
 
-  const world = useWorldItems(scene.bounds);
+  const world = useWorldItems(scene.bounds, scene.tileSize);
   const { x, y, column, row, walkTo, controlled } = useCharacter(
     world.obstacles,
     scene.walkable,
@@ -186,6 +188,12 @@ function SceneStage({
     { translateY: camera.value.y },
     { scale },
   ]);
+
+  // The camera/worldScale/entityScale/density quartet every entity (the
+  // character, every ItemLayer pass) needs to place itself - see
+  // entitySprite.ts's toScreenPoint. Bundled once so each JSX element below
+  // spreads it instead of retyping the same four props five times.
+  const entityProps = { camera, worldScale: scale, entityScale, density };
 
   // The gesture handler is created once and reads current state through refs
   // (and, for the camera, through `camera`'s own live .value), so moving an
@@ -305,10 +313,7 @@ function SceneStage({
           characterY={y}
           layer="floorDecal"
           pass="always"
-          camera={camera}
-          worldScale={scale}
-          entityScale={entityScale}
-          density={density}
+          {...entityProps}
         />
         <ItemLayer
           items={world.items}
@@ -316,20 +321,14 @@ function SceneStage({
           characterY={y}
           layer="object"
           pass="behind"
-          camera={camera}
-          worldScale={scale}
-          entityScale={entityScale}
-          density={density}
+          {...entityProps}
         />
         <Character
           x={x}
           y={y}
           column={column}
           row={row}
-          camera={camera}
-          worldScale={scale}
-          entityScale={entityScale}
-          density={density}
+          {...entityProps}
         />
         <ItemLayer
           items={world.items}
@@ -337,10 +336,7 @@ function SceneStage({
           characterY={y}
           layer="object"
           pass="front"
-          camera={camera}
-          worldScale={scale}
-          entityScale={entityScale}
-          density={density}
+          {...entityProps}
         />
         <ItemLayer
           items={world.items}
@@ -348,10 +344,7 @@ function SceneStage({
           characterY={y}
           layer="overhead"
           pass="always"
-          camera={camera}
-          worldScale={scale}
-          entityScale={entityScale}
-          density={density}
+          {...entityProps}
         />
       </Canvas>
 

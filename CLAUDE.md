@@ -7,6 +7,37 @@ character lives in a room you decorate. Art is LimeZu "Modern Interiors" (16x16 
 
 This file is the project's long-term memory. Read it before changing anything.
 
+## Current state & next steps
+
+Two scenes exist and connect: an outdoor **village** (imported from a Tiled map the user
+maintains outside this repo) and the original indoor **room**, joined by a working door
+portal both ways. Items can be placed via a throwaway dev inventory. That's the whole game
+loop today - **there is no persistence** (everything resets on app restart), **no
+currency/shop** (placing items is free, unlimited), and **no door art** on the room's exit
+wall (it works, nothing is drawn there).
+
+If picking up this project cold, in priority order:
+1. **Persistence** is the single most valuable next step - it's also a prerequisite for
+   almost everything else (a shop, unlocking, and eventually Family Controls integration
+   all need a durable store). Nothing is wired up yet; `useWorldItems`'s `serialize`/
+   `restore` exist and the shape is final, just not connected to any storage.
+2. **Currency/shop**, once persistence exists. Design it as a module that can accept
+   "accrual" from any source (a timer, a daily check-in, or later a Screen-Time event) -
+   don't hardcode it to one mechanism.
+3. **Family Controls / Screen Time** (tying rewards to real reduced phone use - the actual
+   point of this app) was researched but not started. Key facts, so this doesn't need
+   re-researching: the community package `react-native-device-activity` wraps Apple's
+   `FamilyControls`/`DeviceActivity`/`ManagedSettings`. It needs (a) Apple's approval of a
+   "Family Controls (Distribution)" entitlement - apply for this early if serious, it's an
+   external bottleneck with its own timeline, unrelated to code; (b) native iOS app
+   extensions, meaning this project moves off the current plain `expo start --dev-client`
+   workflow onto a proper `prebuild`/EAS Build setup; (c) Apple does **not** expose raw
+   per-app usage minutes to third parties for privacy reasons - only threshold-crossing
+   events and an Apple-rendered report view - so the reward loop has to be designed around
+   *events*, not a live counter; (d) iOS only, no Android equivalent; (e) since iOS 16.4-ish
+   a user can self-authorize (not just a parent for a child), which matters here since the
+   user is monitoring themselves.
+
 ## Stack
 
 Expo SDK 57 · React Native 0.86 · `@shopify/react-native-skia` 2.6 · Reanimated 4.5 +
@@ -28,15 +59,23 @@ must be green before you call anything done.
 
 ## Architecture
 
-Everything lives under `src/game/`. `App.tsx` is a wrapper; `HomeScreen.tsx` owns the canvas,
-the viewport transform and the touch handling.
+Everything lives under `src/game/`. `App.tsx` is a wrapper; `HomeScreen.tsx` holds which
+scene is active and owns the canvas, the viewport transform and the touch handling for
+whichever one is mounted.
 
 | File | Responsibility |
 |---|---|
+| `scene.ts` | The `Scene`/`Tile`/`Portal` shape both the room and the village produce - read this first |
 | `roomConfig.ts` | The single place the room is described: columns, rows, floorStyle, wallStyle |
 | `tilesets.ts` | Style number → coordinates in a Room_Builder tileset |
-| `roomLayout.ts` | Builds tile lists + walkable bounds from the config. Knows shape, not style |
-| `Room.tsx` | Draws the tile layers. Pure renderer |
+| `roomLayout.ts` | Builds a `Scene` from the config. Knows room shape, not style |
+| `village/villageMap.generated.ts` | **GENERATED** by `scripts/import-village-map.mjs` - never hand-edit |
+| `village/villageLayout.ts` | Builds a `Scene` from the generated village data - decodes Tiled flip/rotate/animation bits here |
+| `Room.tsx` / `Village.tsx` | Load each scene's own tileset images, hand off to `SceneLayers` |
+| `SceneLayers.tsx` | The one tile-layer renderer both scenes share - no per-scene branching |
+| `atlas.ts` | Shared `<Atlas>` plumbing: rotation, once-per-tileset mirrored image for `flip` tiles, clock-driven buffer for `animationFrames` tiles |
+| `entitySprite.ts` | Shared camera+entity-scale screen-position math (`toScreenPoint`, `snapToDevicePixel`) used by the character and every item |
+| `portals.ts` | Watches the character's position against the active scene's portals; fires a scene switch on a deliberate crossing |
 | `characterSheet.ts` | Sprite-sheet geometry + animation clips |
 | `Character.tsx` | Draws one 16x32 frame |
 | `useCharacter.ts` | Movement, collision and frame timing on the UI thread |
@@ -65,6 +104,22 @@ code across two conventions without deciding to migrate first.
   is `{ instanceId, itemId, x, y }` and nothing else, so the world stays JSON-serialisable.
 - **`footprint` in the item catalog does three jobs at once:** collision box, y-sort baseline, and
   placement anchor. That is why a floor lamp only blocks its base.
+- **One `Scene` shape for every scene.** `HomeScreen.tsx` picks which to mount from a single
+  `SCENES` lookup table; nothing else branches on `sceneId`. A new scene (a garden, a second
+  room) means producing a `Scene`, not writing a parallel renderer.
+- **The character and every placed item draw at their own `entityScale`**, outside the tile
+  layer's scaled `<Group>` (see `entitySprite.ts`). This is deliberately decoupled from the
+  world's own zoom (`worldScale`) so the camera can show more of a scene without shrinking
+  everything drawn in it.
+- **Both the camera and every entity's screen position snap to the device-pixel grid**
+  (`entitySprite.ts`'s `snapToDevicePixel`, using `PixelRatio.get()` - not a whole RN point,
+  which is several real pixels and snapping to it reads as choppy). Both must snap to the
+  *same* grid or the tile layer and the character visibly fight each other's motion.
+- **Tiled's per-cell flip/rotate bits and per-tile `<animation>` blocks are decoded once**,
+  at scene-build time (`villageLayout.ts`), into the `Tile` shape (`rotate`/`flip`/
+  `animationFrames`). The renderer (`atlas.ts`/`SceneLayers.tsx`) only ever special-cases on
+  those two booleans - up to 4 batched `<Atlas>` calls per (layer, tileset), never one draw
+  call per tile.
 
 ## Asset facts (measured, don't re-derive)
 
@@ -109,9 +164,24 @@ middle, 2 end cap). Style numbering runs down the leftmost column first; see the
    trivially differs from any real value. A portal-trigger check that fired on "index changed since
    last time" fired spuriously on the very first evaluation whenever a scene's arrival spawn point
    sat inside a trigger and the gating flag (`controlled`) turned true before that first evaluation
-   ran - looking exactly like the character crossing the boundary, when it had never moved. Guard
-   explicitly against `previousIndex === null` so only a second-or-later (i.e. real, measured)
-   change can fire. See `src/game/portals.ts`.
+   ran - looking exactly like the character crossing the boundary, when it had never moved. Fixed
+   by owning an explicit `hasSettled` shared value instead of depending on that Reanimated
+   internal's behaviour (real, but never a documented contract). See `src/game/portals.ts`.
+8. **A moving camera needs to snap to whole pixels, and snapping to a whole *point* is not
+   enough.** Fractional camera/entity positions (continuous movement) left hairline gaps between
+   adjacent tiles for one frame at a time - the canvas's own background colour showing through as
+   a flickering seam, worst on large flat areas like grass. The fix (round the camera translate and
+   every entity's screen position to the same grid) initially used `Math.round` on RN points, which
+   made motion visibly choppy - a point is several real device pixels (`PixelRatio.get()`, 3 on a
+   typical iPhone), so that was 3x coarser than the screen can actually show. Round to the nearest
+   *device* pixel (`Math.round(v * density) / density`), not the nearest point.
+9. **Re-running `scripts/import-village-map.mjs` always imports whatever is currently in the live
+   `.tmx` file** - there is no way to import "just this one thing" from it. If the user has
+   unrelated in-progress edits in Tiled when you re-run it for an unrelated reason (e.g. testing an
+   importer change), the regenerated `villageMap.generated.ts` silently carries those edits too.
+   Always check `git diff --stat` on the regenerated file before committing; if it contains changes
+   you didn't intend, `git checkout --` it back and patch narrowly instead (e.g. with a small script
+   that edits just the new field), rather than importing the user's in-progress work without asking.
 
 ## Rules we follow
 
@@ -127,8 +197,8 @@ middle, 2 end cap). Style numbering runs down the leftmost column first; see the
   noticeably off-target even after accounting for both, and pinning down the actual mapping wasn't
   worth the time. For anything needing a *precise* room-pixel target (e.g. hitting a small trigger
   zone), prefer seeding state in code (call `walkTo(x, y)` etc. directly from a `// TEMP` effect)
-  over calculating tap coordinates - it is exact and it is what actually caught the two portal bugs
-  below. Reach for a real `idb ui tap` only when a genuine touch round-trip (not just a resulting
+  over calculating tap coordinates - it is exact and it is what actually caught mistake #7 below.
+  Reach for a real `idb ui tap` only when a genuine touch round-trip (not just a resulting
   position) is what's being verified, and confirm the target visually before trusting the result.
 - **`runOnJS(console.log)` throws and freezes the whole UI-thread runtime.** Worklets rejects
   passing `console.log` straight to `runOnJS` ("locally defined function passed to scheduleOnRN") -
@@ -149,8 +219,17 @@ middle, 2 end cap). Style numbering runs down the leftmost column first; see the
   sorting; that is the intended tuning knob.
 - The dev inventory is disposable. The item catalog, the world state and the layer system are not —
   they are meant to survive into the real shop.
+- The village's source Tiled project (`map.tmx` + its tileset images) lives at
+  `~/SERENE_VILLAGE_REVAMPED/maps/`, **outside this repo and not in git** — the path is hardcoded
+  as `SOURCE_TMX` at the top of `scripts/import-village-map.mjs`. Re-run that script after Emil
+  edits the map in Tiled; see mistake #9 above before doing this for any *other* reason.
+- Portals live in scene data, not code: `Scene.portals` (a trigger `Bounds` + which scene/spawn it
+  leads to). Adding a second room or a garden mainly means giving its `Scene` a portal that points
+  back the way it came — `HomeScreen.tsx` doesn't need to change.
 
-  ## For my self (Emil)
-  Resume this session with:
-  claude --resume 6ea1758a-41d9-459b-911a-3fda8d5ec3ea
+## For my self (Emil)
+
+Resume this session with `claude --resume` (pick from the list — the ID changes every session,
+not worth hardcoding here). If Claude Code seems unaware of recent context, tell it to read this
+file — it is kept current on purpose, exactly for that.
 

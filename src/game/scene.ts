@@ -80,6 +80,22 @@ export type Scene = {
   walkable: Bounds;
   /** Bounds an item may be placed/dragged within. */
   bounds: Bounds;
+  /**
+   * If set, an item's footprint anchor must land on a tile this grid marks
+   * `1` (see useWorldItems.ts's `isValidPlacement`) - e.g. the village
+   * restricts placement to grass/beach/paths and the like, not fences or
+   * house walls. Omitted (the room) means anywhere in `bounds` is valid,
+   * unchanged from before this existed.
+   */
+  placementMask?: TileCollision;
+  /**
+   * The name of the one layer (if any) that should draw *above* items and
+   * the character instead of below - e.g. the village's roof overhangs, so
+   * the character visibly walks behind them instead of over them. Omitted
+   * (the room) means every layer draws below, unchanged from before this
+   * existed.
+   */
+  topLayerName?: string;
   /** Default spawn, used on a cold app start (not via a portal). */
   start: { x: number; y: number };
   portals: Portal[];

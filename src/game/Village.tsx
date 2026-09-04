@@ -1,9 +1,12 @@
 import { useImage } from "@shopify/react-native-skia";
 
-import { SceneLayers } from "./SceneLayers";
-import { VILLAGE } from "./village/villageLayout";
-
-export const Village = () => {
+/**
+ * Loads the village's tileset images. A hook, not a component that draws
+ * itself, because HomeScreen.tsx needs to draw the scene's layers in two
+ * separate passes (below vs. above the character - see `Scene.topLayerName`)
+ * sharing these same decoded images rather than loading them twice.
+ */
+export const useVillageImages = () => {
   // Order matches VILLAGE_TILESETS in villageMap.generated.ts (sorted by
   // firstGid): Terrains, Outside_Stuff, Houses.
   const terrains = useImage(
@@ -16,7 +19,5 @@ export const Village = () => {
     require("../assets/tiles/Houses_TILESET_B-C-D-E.png"),
   );
 
-  return (
-    <SceneLayers scene={VILLAGE} images={[terrains, outsideStuff, houses]} />
-  );
+  return [terrains, outsideStuff, houses];
 };

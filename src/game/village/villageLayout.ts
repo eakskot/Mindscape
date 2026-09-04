@@ -117,13 +117,49 @@ const animationFramesFor = (
   return frames;
 };
 
+/**
+ * Which of the map's own layers count as valid ground for a placed item -
+ * everything else (fences, houses, the top-of-structures roof layer, ...)
+ * is off-limits, the same spirit as the tile-collision grid below but for
+ * "may an item stand here" instead of "may the character stand here". See
+ * useWorldItems.ts's `isValidPlacement`.
+ *
+ * Not a simple "any of these layers has a tile" OR, though - `grass` is the
+ * base ground layer and covers nearly the *whole* map, including every
+ * tile a fence or house also stands on (they're drawn on top of it, not
+ * instead of it). A cell only counts as valid ground if one of these
+ * layers has a tile there *and* none of the other (blocking) layers do -
+ * see the two-grid pass below.
+ */
+const PLACEMENT_LAYER_NAMES = new Set([
+  "grass",
+  "water_collision",
+  "beach",
+  "paths",
+  "small_extras",
+]);
+
+/**
+ * The one layer that draws *above* items and the character instead of
+ * below - the house roofs, so the character walks visibly behind/under
+ * them rather than over them. See HomeScreen.tsx's two-pass render.
+ */
+const TOP_LAYER_NAME = "top_layer_collision";
+
 const buildVillageLayout = (): Scene => {
   const layers: SceneLayer[] = [];
   const grid = new Uint8Array(VILLAGE_COLUMNS * VILLAGE_ROWS);
+  // Two passes combined after the loop (see PLACEMENT_LAYER_NAMES's own
+  // comment): allowedGrid is "an allowed ground layer has a tile here",
+  // blockedGrid is "some other layer does too" - a cell is only placeable
+  // ground if the former is true and the latter isn't.
+  const allowedGrid = new Uint8Array(VILLAGE_COLUMNS * VILLAGE_ROWS);
+  const blockedGrid = new Uint8Array(VILLAGE_COLUMNS * VILLAGE_ROWS);
 
   for (const layer of VILLAGE_LAYERS) {
     const tilesByTileset: Tile[][] = VILLAGE_TILESETS.map(() => []);
     const isCollisionLayer = layer.collision;
+    const isPlacementLayer = PLACEMENT_LAYER_NAMES.has(layer.name);
 
     for (let row = 0; row < VILLAGE_ROWS; row++) {
       for (let column = 0; column < VILLAGE_COLUMNS; column++) {
@@ -157,10 +193,20 @@ const buildVillageLayout = (): Scene => {
         if (isCollisionLayer) {
           grid[row * VILLAGE_COLUMNS + column] = 1;
         }
+        if (isPlacementLayer) {
+          allowedGrid[row * VILLAGE_COLUMNS + column] = 1;
+        } else {
+          blockedGrid[row * VILLAGE_COLUMNS + column] = 1;
+        }
       }
     }
 
     layers.push({ name: layer.name, tilesByTileset });
+  }
+
+  const placementGrid = new Uint8Array(VILLAGE_COLUMNS * VILLAGE_ROWS);
+  for (let i = 0; i < placementGrid.length; i++) {
+    placementGrid[i] = allowedGrid[i] === 1 && blockedGrid[i] === 0 ? 1 : 0;
   }
 
   const width = VILLAGE_COLUMNS * VILLAGE_TILE;
@@ -177,6 +223,13 @@ const buildVillageLayout = (): Scene => {
       rows: VILLAGE_ROWS,
       tileSize: VILLAGE_TILE,
     },
+    placementMask: {
+      grid: placementGrid,
+      columns: VILLAGE_COLUMNS,
+      rows: VILLAGE_ROWS,
+      tileSize: VILLAGE_TILE,
+    },
+    topLayerName: TOP_LAYER_NAME,
     width,
     height,
     // The whole map, not an artificial radius - real containment comes from

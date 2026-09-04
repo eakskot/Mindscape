@@ -40,7 +40,8 @@ import type { ItemImages } from "./itemImages";
  */
 export type LayerPass = "behind" | "front" | "always";
 
-type EntityProps = {
+/** Shared with DragHighlight.tsx, which places its glow the same way. */
+export type EntityProps = {
   camera: SharedValue<{ x: number; y: number }>;
   worldScale: number;
   entityScale: number;

@@ -17,13 +17,20 @@ export type ItemId =
   | "bed_green"
   | "bed_purple"
   | "dinosaur_skeleton"
+  | "fountain_small"
+  | "fountain_statue"
+  | "fountain_tiered"
   | "fruit_citrus"
   | "guitar_red"
   | "lamp"
   | "piano_gold"
+  | "plant_fern"
+  | "plant_fern_bloomed"
   | "plant_long"
   | "plant_medium"
   | "plant_palm_big"
+  | "plant_stand"
+  | "plant_topiary"
   | "table_medium";
 
 /**
@@ -108,6 +115,48 @@ export const ITEM_CATALOG: Record<ItemId, ItemDefinition> = {
     solid: true,
     unlocked: true,
   },
+  // The three fountains below come from LimeZu's "Modern Exteriors" pack
+  // (~/modernexteriors-win), a separate pack from the room's "Modern
+  // Interiors" one - see AGENTS.md's own asset-facts section for that one.
+  // Each source sprite ships as 4 frames, but they are not a walk-cycle:
+  // frames 1/2 are dry and 3/4 have water, while 1/3 are a silver-stone
+  // variant and 2/4 gold - two independent two-way toggles, not a sequence.
+  // Animating through all 4 in order would flicker between stone colours
+  // every loop, so only the silver, water-filled frame (_3) was kept as a
+  // static sprite.
+  fountain_small: {
+    id: "fountain_small",
+    label: "Fountain (small)",
+    source: require("../../assets/sprites/outdoor/fountain_small.png"),
+    width: 32,
+    height: 48,
+    footprint: { x: 6, y: 38, width: 20, height: 10 },
+    layer: "object",
+    solid: true,
+    unlocked: true,
+  },
+  fountain_statue: {
+    id: "fountain_statue",
+    label: "Statue fountain",
+    source: require("../../assets/sprites/outdoor/fountain_statue.png"),
+    width: 48,
+    height: 96,
+    footprint: { x: 1, y: 82, width: 47, height: 14 },
+    layer: "object",
+    solid: true,
+    unlocked: true,
+  },
+  fountain_tiered: {
+    id: "fountain_tiered",
+    label: "Fountain (tiered)",
+    source: require("../../assets/sprites/outdoor/fountain_tiered.png"),
+    width: 64,
+    height: 80,
+    footprint: { x: 5, y: 66, width: 56, height: 14 },
+    layer: "object",
+    solid: true,
+    unlocked: true,
+  },
   fruit_citrus: {
     id: "fruit_citrus",
     label: "Fruit bowl",
@@ -152,6 +201,30 @@ export const ITEM_CATALOG: Record<ItemId, ItemDefinition> = {
     solid: true,
     unlocked: true,
   },
+  // The four items below also come from "Modern Exteriors" - see
+  // fountain_small's comment above.
+  plant_fern: {
+    id: "plant_fern",
+    label: "Potted fern",
+    source: require("../../assets/sprites/outdoor/plant_fern.png"),
+    width: 32,
+    height: 32,
+    footprint: { x: 9, y: 24, width: 16, height: 8 },
+    layer: "object",
+    solid: true,
+    unlocked: true,
+  },
+  plant_fern_bloomed: {
+    id: "plant_fern_bloomed",
+    label: "Potted fern (flowering)",
+    source: require("../../assets/sprites/outdoor/plant_fern_bloomed.png"),
+    width: 32,
+    height: 32,
+    footprint: { x: 9, y: 24, width: 16, height: 8 },
+    layer: "object",
+    solid: true,
+    unlocked: true,
+  },
   plant_long: {
     id: "plant_long",
     label: "Tall plant",
@@ -181,6 +254,28 @@ export const ITEM_CATALOG: Record<ItemId, ItemDefinition> = {
     width: 32,
     height: 32,
     footprint: { x: 10, y: 24, width: 12, height: 7 },
+    layer: "object",
+    solid: true,
+    unlocked: true,
+  },
+  plant_stand: {
+    id: "plant_stand",
+    label: "Plant stand",
+    source: require("../../assets/sprites/outdoor/plant_stand.png"),
+    width: 16,
+    height: 64,
+    footprint: { x: 1, y: 54, width: 13, height: 10 },
+    layer: "object",
+    solid: true,
+    unlocked: true,
+  },
+  plant_topiary: {
+    id: "plant_topiary",
+    label: "Topiary",
+    source: require("../../assets/sprites/outdoor/plant_topiary.png"),
+    width: 16,
+    height: 32,
+    footprint: { x: 3, y: 24, width: 10, height: 8 },
     layer: "object",
     solid: true,
     unlocked: true,

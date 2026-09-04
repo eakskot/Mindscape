@@ -1,5 +1,5 @@
 {
-    "activeFile": "",
+    "activeFile": "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps/map.tmx",
     "expandedProjectPaths": [
     ],
     "file.lastUsedOpenFilter": "Alle Filer (*)",
@@ -21,11 +21,11 @@
             "expandedGroupLayers": [
                 9
             ],
-            "scale": 0.3411,
-            "selectedLayer": 1,
+            "scale": 0.5118,
+            "selectedLayer": 8,
             "viewCenter": {
-                "x": 982.1166813251245,
-                "y": 642.0404573438874
+                "x": 633.0597889800703,
+                "y": 296.9910121141071
             }
         },
         "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps/map.tmx#Houses_TILESET_B-C-D-E": {
@@ -41,8 +41,8 @@
             "scale": 1.1642,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 356.4679608314723,
-                "y": 153.75365057550255
+                "x": 239.64954475176089,
+                "y": 154.61260951726507
             }
         },
         "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps/testmap.tmx#garde-tiles-v1": {
@@ -61,11 +61,13 @@
     "map.tileWidth": 16,
     "map.width": 120,
     "openFiles": [
-        "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps/testmap.tmx"
+        "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps/testmap.tmx",
+        "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps/map.tmx"
     ],
     "project": "roomsv1.tiled-project",
     "recentFiles": [
-        "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps/testmap.tmx"
+        "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps/testmap.tmx",
+        "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps/map.tmx"
     ],
     "tileset.embedInMap": true,
     "tileset.lastUsedFilter": "Alle Filer (*)",

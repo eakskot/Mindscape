@@ -1,5 +1,5 @@
-import { Canvas, Group } from "@shopify/react-native-skia";
-import { useCallback, useMemo, useRef, useState, type ComponentType } from "react";
+import { Canvas, Group, useClock, type SkImage } from "@shopify/react-native-skia";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PanResponder,
   PixelRatio,
@@ -7,31 +7,42 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import { useDerivedValue } from "react-native-reanimated";
+import {
+  useDerivedValue,
+  useFrameCallback,
+  useSharedValue,
+} from "react-native-reanimated";
 
 import { clamp } from "../../game/bounds";
 import { Character } from "../../game/Character";
 import { snapToDevicePixel } from "../../game/entitySprite";
 import { DevInventory } from "../../game/items/DevInventory";
+import { DragHighlight } from "../../game/items/DragHighlight";
+import type { EditMode } from "../../game/items/editMode";
 import { ItemLayer } from "../../game/items/ItemLayer";
+import type { ItemId } from "../../game/items/itemCatalog";
 import { useItemImages } from "../../game/items/itemImages";
 import { useWorldItems } from "../../game/items/useWorldItems";
 import { usePortalWatcher } from "../../game/portals";
-import { Room } from "../../game/Room";
+import { useRoomImages } from "../../game/Room";
 import { ROOM } from "../../game/roomLayout";
+import { SceneLayers } from "../../game/SceneLayers";
 import type { Portal, Scene, SceneId } from "../../game/scene";
 import { useCharacter } from "../../game/useCharacter";
-import { Village } from "../../game/Village";
+import { useVillageImages } from "../../game/Village";
 import { VILLAGE } from "../../game/village/villageLayout";
 
 /**
- * Which component draws each scene's tiles. The scene *data* lives with the
- * scene itself (villageLayout.ts / roomLayout.ts) - this table only says
- * what to render for a given id, so HomeScreen never hardcodes "village".
+ * Which images to load for each scene's tiles. The scene *data* lives with
+ * the scene itself (villageLayout.ts / roomLayout.ts) - this table only
+ * says what to load for a given id, so HomeScreen never hardcodes "village".
+ * A hook, not a component, because SceneStage below needs the images
+ * itself: it draws the scene's layers in two passes (below vs. above the
+ * character - see `Scene.topLayerName`), not as one opaque unit.
  */
-const SCENES: Record<SceneId, { scene: Scene; Component: ComponentType }> = {
-  village: { scene: VILLAGE, Component: Village },
-  room: { scene: ROOM, Component: Room },
+const SCENES: Record<SceneId, { scene: Scene; useImages: () => (SkImage | null)[] }> = {
+  village: { scene: VILLAGE, useImages: useVillageImages },
+  room: { scene: ROOM, useImages: useRoomImages },
 };
 
 /**
@@ -46,12 +57,52 @@ const SCENES: Record<SceneId, { scene: Scene; Component: ComponentType }> = {
 const ENTITY_SCALE_MULTIPLIER = 2;
 
 /**
- * Where the camera should sit so `charX,charY` (room pixels) lands in the
- * middle of the screen. Two cases: a scene bigger than the viewport (the
- * village) follows the character, clamped so it never shows past the
- * scene's edge; a scene smaller than the viewport (the room) is simply
- * centred - following the character there would do nothing but the naive
- * clamp (min==max==0) would pin it to a corner instead of the middle.
+ * A touch has to travel at least this many RN points before the
+ * PanResponder below treats it as dragging the camera instead of a tap -
+ * short enough that panning still feels immediate, long enough that an
+ * unsteady finger on a tap-to-move doesn't nudge the camera or get eaten as
+ * a drag.
+ */
+const TAP_DRAG_THRESHOLD = 8;
+
+/**
+ * The valid range for the camera's translateX/Y, in screen pixels, so the
+ * scene never shows past its own edge. A scene bigger than the viewport
+ * (the village) can slide between showing its start and its end; a scene
+ * smaller than the viewport (the room) collapses min===max to the single
+ * centred position - simply clamping min=width-sceneWidthPx (positive
+ * there) against max=0 would invert the range and force everything to 0
+ * (pinned to a corner) instead of centred, so it needs its own branch, not
+ * just a clamp. Shared by `followPosition` below and the PanResponder's
+ * drag math, so both agree on where the camera is allowed to go - in
+ * particular so dragging in the room (which fits on screen already) is a
+ * no-op instead of visibly nudging it off-centre.
+ */
+const cameraRange = (
+  scale: number,
+  width: number,
+  height: number,
+  sceneWidth: number,
+  sceneHeight: number,
+) => {
+  "worklet";
+  const sceneWidthPx = sceneWidth * scale;
+  const sceneHeightPx = sceneHeight * scale;
+  const x =
+    sceneWidthPx <= width
+      ? { min: (width - sceneWidthPx) / 2, max: (width - sceneWidthPx) / 2 }
+      : { min: width - sceneWidthPx, max: 0 };
+  const y =
+    sceneHeightPx <= height
+      ? { min: (height - sceneHeightPx) / 2, max: (height - sceneHeightPx) / 2 }
+      : { min: height - sceneHeightPx, max: 0 };
+  return { x, y };
+};
+
+/**
+ * Where the camera sits when centred on `charX,charY` (room pixels) - used
+ * both to seed the camera at mount and by the per-frame follow in
+ * SceneStage below.
  *
  * Snapped to the device-pixel grid before returning (see entitySprite.ts's
  * `snapToDevicePixel`). Every tile's own position is already an exact
@@ -63,7 +114,7 @@ const ENTITY_SCALE_MULTIPLIER = 2;
  * pixel snapping"), the translation counterpart to the "integer scale only"
  * rule above.
  */
-const cameraOffset = (
+const followPosition = (
   charX: number,
   charY: number,
   scale: number,
@@ -84,16 +135,9 @@ const cameraOffset = (
   density: number,
 ) => {
   "worklet";
-  const sceneWidthPx = sceneWidth * scale;
-  const sceneHeightPx = sceneHeight * scale;
-  const x =
-    sceneWidthPx <= width
-      ? (width - sceneWidthPx) / 2
-      : clamp(width / 2 - charX * scale, width - sceneWidthPx, 0);
-  const y =
-    sceneHeightPx <= height
-      ? (height - sceneHeightPx) / 2
-      : clamp(height / 2 - charY * scale, height - sceneHeightPx, 0);
+  const range = cameraRange(scale, width, height, sceneWidth, sceneHeight);
+  const x = clamp(width / 2 - charX * scale, range.x.min, range.x.max);
+  const y = clamp(height / 2 - charY * scale, range.y.min, range.y.max);
   return {
     x: snapToDevicePixel(x, density),
     y: snapToDevicePixel(y, density),
@@ -145,17 +189,53 @@ function SceneStage({
   onPortal: (portal: Portal) => void;
 }) {
   const { width, height } = useWindowDimensions();
-  const { scene, Component: SceneComponent } = SCENES[sceneId];
+  const { scene, useImages } = SCENES[sceneId];
+  const sceneImages = useImages();
 
-  const world = useWorldItems(scene.bounds, scene.tileSize);
+  const world = useWorldItems(scene.bounds, scene.tileSize, scene.placementMask);
+  const [editMode, setEditMode] = useState<EditMode>("none");
+  // Mirrors `editMode` into a shared value - see its own comment further
+  // down for why a plain ref won't do. Declared before useCharacter so it
+  // can be passed straight in as the "hold still" signal for move/delete
+  // mode (see useCharacter.ts's `frozen`).
+  const editModeActive = useSharedValue(editMode !== "none");
+  useEffect(() => {
+    editModeActive.value = editMode !== "none";
+  }, [editMode, editModeActive]);
+
   const { x, y, column, row, walkTo, controlled } = useCharacter(
     world.obstacles,
     scene.walkable,
     spawn,
     scene.tileCollision,
+    editModeActive,
   );
   const images = useItemImages();
-  const [deleteMode, setDeleteMode] = useState(false);
+  // Which placed item is currently being held in move mode, for
+  // DragHighlight's glow - null the rest of the time (including in delete
+  // mode, which never holds anything). See the PanResponder below.
+  const [draggedInstanceId, setDraggedInstanceId] = useState<string | null>(null);
+  // Whether the held item's *current* position would be a legal drop - the
+  // live yellow/red feedback DragHighlight shows while dragging, and what
+  // onPanResponderRelease uses to decide commit vs. bounce-back.
+  const [dragValid, setDragValid] = useState(true);
+  const draggedItem =
+    world.items.find((item) => item.instanceId === draggedInstanceId) ?? null;
+
+  // One clock shared by every animated tile across both of the layer passes
+  // below (below the character, and the roof pass above it) - see
+  // SceneLayers.tsx's own comment on why it must be the same clock rather
+  // than one per pass.
+  const clock = useClock();
+  // The village's roof draws in a second pass, above the character and
+  // items, instead of in the single below-everything pass every other
+  // layer uses - see Scene.topLayerName's own comment.
+  const belowLayers = scene.topLayerName
+    ? scene.layers.filter((layer) => layer.name !== scene.topLayerName)
+    : scene.layers;
+  const aboveLayer = scene.topLayerName
+    ? scene.layers.find((layer) => layer.name === scene.topLayerName)
+    : undefined;
 
   // Walking into a door switches scenes - see portals.ts. Lives here, not in
   // useCharacter, because it's a HomeScreen-level concern layered on top of
@@ -173,16 +253,63 @@ function SceneStage({
   );
   const entityScale = scale * ENTITY_SCALE_MULTIPLIER;
 
-  // The camera follows the character every frame on the UI thread - it must
-  // not touch React, same rule as the character's own movement. Exposed as
-  // its own shared value (not just baked into `transform` below) so the
-  // character and items - which draw outside the world's Group to get their
-  // own scale - can read the same live camera position, computed once per
-  // frame rather than once per axis.
   const density = PixelRatio.get();
-  const camera = useDerivedValue(() =>
-    cameraOffset(x.value, y.value, scale, width, height, scene.width, scene.height, density),
+
+  // The live camera position, in screen pixels. A plain shared value, not a
+  // useDerivedValue, because it needs actual memory: whether it tracks the
+  // character this frame depends on `following` below, which a pure
+  // function of the current inputs can't express - see the frame loop and
+  // `following`'s own comment. Seeded already centred on the spawn point so
+  // there is no first-frame flash at the wrong position. Exposed as its own
+  // shared value (not just baked into `transform` below) so the character
+  // and items - which draw outside the world's Group to get their own scale
+  // - can read the same live camera position too.
+  const camera = useSharedValue(
+    followPosition(spawn.x, spawn.y, scale, width, height, scene.width, scene.height, density),
   );
+
+  // Whether the camera should keep centring on the character every frame.
+  // Starts true (freshly spawned, nothing panned yet); a real camera drag
+  // (see the PanResponder below) turns it off, and - this is the important
+  // part - nothing ever turns it back on again for the rest of this
+  // scene's lifetime, not even tapping to walk somewhere. Two bugs taught
+  // this the hard way: first, resuming on the *next frame* after a drag
+  // dragged the view straight back towards the character mid-walk, since
+  // `followPosition` has no easing - it teleports, so any per-frame
+  // "resume" reads as constant drift. Then, resuming *on tap* had the same
+  // teleport problem at gesture scale: pan over to look at the beach, tap
+  // a tree there, and the whole screen would yank itself back onto the
+  // character (who might be nowhere near what you tapped) with no warning.
+  // So a pan is simply a one-way handoff of camera control to the player -
+  // they can always pan back themselves, and a scene remount (switching
+  // village/room) resets this fresh regardless.
+  const following = useSharedValue(true);
+
+  // While arranging furniture the camera must hold still regardless of
+  // `following` (see `editModeActive`, declared up near useCharacter) -
+  // belt-and-braces on top of the character now being frozen too (see
+  // useCharacter.ts's `frozen`): the camera itself should never auto-track
+  // during edit mode even if something else nudges the character.
+
+  // The camera follows the character every frame on the UI thread - it must
+  // not touch React, same rule as the character's own movement.
+  useFrameCallback(() => {
+    "worklet";
+    if (!following.value || editModeActive.value) {
+      return;
+    }
+    camera.value = followPosition(
+      x.value,
+      y.value,
+      scale,
+      width,
+      height,
+      scene.width,
+      scene.height,
+      density,
+    );
+  });
+
   const transform = useDerivedValue(() => [
     { translateX: camera.value.x },
     { translateY: camera.value.y },
@@ -203,16 +330,41 @@ function SceneStage({
   // so a plain ref is enough.
   const scaleRef = useRef(scale);
   scaleRef.current = scale;
+  // Same staleness concern as scaleRef - width/height come from
+  // useWindowDimensions and can change on rotation, but the PanResponder
+  // below is only built once (see the responder's own useMemo).
+  const widthRef = useRef(width);
+  widthRef.current = width;
+  const heightRef = useRef(height);
+  heightRef.current = height;
   const worldRef = useRef(world);
   worldRef.current = world;
-  const deleteModeRef = useRef(deleteMode);
-  deleteModeRef.current = deleteMode;
+  const editModeRef = useRef(editMode);
+  editModeRef.current = editMode;
   const drag = useRef<{
     instanceId: string;
+    itemId: ItemId;
     grabX: number;
     grabY: number;
     lastX: number;
     lastY: number;
+    // Where the item stood before this drag, to bounce back to on an
+    // invalid drop - always itself a valid, already-snapped position.
+    startX: number;
+    startY: number;
+  } | null>(null);
+  // A background touch (nothing under the finger at grant) starts out as a
+  // pan candidate; it only becomes a real camera drag once it travels past
+  // TAP_DRAG_THRESHOLD (see onPanResponderMove), so a plain tap still falls
+  // through to walkTo on release. Screen-space start point + the camera's
+  // own position at grant time, so a drag begun mid-pan continues from
+  // where it was instead of jumping.
+  const pan = useRef<{
+    startX: number;
+    startY: number;
+    startCameraX: number;
+    startCameraY: number;
+    moved: boolean;
   } | null>(null);
 
   /** Screen point -> room pixels, using the camera's current position. */
@@ -232,59 +384,192 @@ function SceneStage({
           const { locationX, locationY } = event.nativeEvent;
           const { roomX, roomY } = toRoomPoint(locationX, locationY);
 
-          const item = worldRef.current.itemAt(roomX, roomY);
+          // Outside move/delete mode, items are inert scenery - every touch
+          // is plain tap-to-walk/camera-drag, same as if there were no
+          // furniture there at all. This is the fix for a touch near a big
+          // item (a fountain, the plant stand) getting eaten as an
+          // accidental grab instead of a walk, and vice versa - dragging
+          // now only ever happens on purpose, inside a mode you chose.
+          const item =
+            editModeRef.current !== "none"
+              ? worldRef.current.itemAt(roomX, roomY, ENTITY_SCALE_MULTIPLIER)
+              : undefined;
           if (!item) {
             drag.current = null;
+            pan.current = {
+              startX: locationX,
+              startY: locationY,
+              startCameraX: camera.value.x,
+              startCameraY: camera.value.y,
+              moved: false,
+            };
             return;
           }
-          if (deleteModeRef.current) {
+          pan.current = null;
+          if (editModeRef.current === "delete") {
             worldRef.current.removeItem(item.instanceId);
             drag.current = null;
             return;
           }
           drag.current = {
             instanceId: item.instanceId,
+            itemId: item.itemId,
             // Keep the grab point under the finger instead of snapping the
             // item's corner to it.
             grabX: roomX - item.x,
             grabY: roomY - item.y,
             lastX: item.x,
             lastY: item.y,
+            startX: item.x,
+            startY: item.y,
           };
+          setDraggedInstanceId(item.instanceId);
+          setDragValid(true);
         },
 
         onPanResponderMove: (event) => {
-          const active = drag.current;
-          if (!active) {
+          const itemDrag = drag.current;
+          if (itemDrag) {
+            const { locationX, locationY } = event.nativeEvent;
+            const { roomX, roomY } = toRoomPoint(locationX, locationY);
+            itemDrag.lastX = roomX - itemDrag.grabX;
+            itemDrag.lastY = roomY - itemDrag.grabY;
+            // Free movement while dragging; snapped on release.
+            worldRef.current.moveItem(
+              itemDrag.instanceId,
+              itemDrag.lastX,
+              itemDrag.lastY,
+              false,
+            );
+            // Live yellow/red feedback - checked against where release would
+            // actually snap to, not the raw finger position, so the glow
+            // never lies about what a drop right now would do. Both the
+            // ground check and the "would this land on another item"
+            // check have to pass - dragging one item onto another used to
+            // silently let them overlap, which is exactly what made the
+            // covered one feel unclickable afterwards (see itemAt's
+            // baseline-priority pick).
+            setDragValid(
+              worldRef.current.isValidPlacement(
+                itemDrag.lastX,
+                itemDrag.lastY,
+                itemDrag.itemId,
+              ) &&
+                !worldRef.current.overlapsOtherItem(
+                  itemDrag.lastX,
+                  itemDrag.lastY,
+                  itemDrag.itemId,
+                  itemDrag.instanceId,
+                ),
+            );
+            return;
+          }
+
+          const panDrag = pan.current;
+          if (!panDrag) {
             return;
           }
           const { locationX, locationY } = event.nativeEvent;
-          const { roomX, roomY } = toRoomPoint(locationX, locationY);
-          active.lastX = roomX - active.grabX;
-          active.lastY = roomY - active.grabY;
-          // Free movement while dragging; snapped on release.
-          worldRef.current.moveItem(
-            active.instanceId,
-            active.lastX,
-            active.lastY,
-            false,
+          const dx = locationX - panDrag.startX;
+          const dy = locationY - panDrag.startY;
+          if (
+            !panDrag.moved &&
+            dx * dx + dy * dy < TAP_DRAG_THRESHOLD * TAP_DRAG_THRESHOLD
+          ) {
+            // Still within the tap threshold - don't nudge the camera yet.
+            return;
+          }
+          panDrag.moved = true;
+          // A real drag: stop auto-following (see `following`'s own
+          // comment) and move the camera 1:1 with the finger, clamped to
+          // the same range the follow camera itself respects.
+          following.value = false;
+          const range = cameraRange(
+            scaleRef.current,
+            widthRef.current,
+            heightRef.current,
+            scene.width,
+            scene.height,
           );
+          camera.value = {
+            x: snapToDevicePixel(
+              clamp(panDrag.startCameraX + dx, range.x.min, range.x.max),
+              density,
+            ),
+            y: snapToDevicePixel(
+              clamp(panDrag.startCameraY + dy, range.y.min, range.y.max),
+              density,
+            ),
+          };
         },
 
         onPanResponderRelease: (event) => {
-          const active = drag.current;
-          if (active) {
-            worldRef.current.moveItem(
-              active.instanceId,
-              active.lastX,
-              active.lastY,
-            );
+          const itemDrag = drag.current;
+          if (itemDrag) {
+            const valid =
+              worldRef.current.isValidPlacement(
+                itemDrag.lastX,
+                itemDrag.lastY,
+                itemDrag.itemId,
+              ) &&
+              !worldRef.current.overlapsOtherItem(
+                itemDrag.lastX,
+                itemDrag.lastY,
+                itemDrag.itemId,
+                itemDrag.instanceId,
+              );
+            if (valid) {
+              worldRef.current.moveItem(
+                itemDrag.instanceId,
+                itemDrag.lastX,
+                itemDrag.lastY,
+              );
+            } else {
+              // Bounce back to where the drag started - startX/startY was
+              // already a valid, snapped position, so this can't itself
+              // land somewhere illegal.
+              worldRef.current.moveItem(
+                itemDrag.instanceId,
+                itemDrag.startX,
+                itemDrag.startY,
+              );
+            }
             drag.current = null;
+            setDraggedInstanceId(null);
             return;
           }
+
+          const panDrag = pan.current;
+          pan.current = null;
+          if (panDrag?.moved) {
+            // A real drag panned the camera - not a tap, so the character
+            // stays put and the camera stays frozen right where the player
+            // left it (see `following`).
+            return;
+          }
+
+          // Outside move/delete mode, a plain background tap walks the
+          // character there, same as always. Inside either mode, the
+          // screen is for arranging furniture, not walking - a background
+          // tap does nothing (no accidental walk while you're trying to
+          // tidy up).
+          if (editModeRef.current !== "none") {
+            return;
+          }
+
           const { locationX, locationY } = event.nativeEvent;
           const { roomX, roomY } = toRoomPoint(locationX, locationY);
           walkTo(roomX, roomY);
+          // Deliberately *not* touching `following`/`camera` here. An
+          // earlier version resumed following and snapped the camera onto
+          // the character the instant you tapped - but if you'd panned
+          // away to look at, say, the beach, and tapped a tree back near
+          // the character (or anywhere the character currently wasn't),
+          // that snap yanked the whole screen off the beach and onto the
+          // character with no warning, because `followPosition` has no
+          // easing - it teleports. A tap should only ever aim the
+          // character; the camera stays exactly where you put it, panned
+          // or not, until you deliberately pan it again yourself.
         },
       }),
     [walkTo],
@@ -305,7 +590,12 @@ function SceneStage({
           from which Group (if any) it's nested in.
         */}
         <Group transform={transform}>
-          <SceneComponent />
+          <SceneLayers
+            layers={belowLayers}
+            tileSize={scene.tileSize}
+            clock={clock}
+            images={sceneImages}
+          />
         </Group>
         <ItemLayer
           items={world.items}
@@ -346,13 +636,35 @@ function SceneStage({
           pass="always"
           {...entityProps}
         />
+        {/*
+          The roof/tree-canopy layer, if the scene has one - drawn last so
+          it paints over the character and every item instead of under
+          them, the same "walk behind the roof" effect a real house needs.
+          See Scene.topLayerName.
+        */}
+        {aboveLayer && (
+          <Group transform={transform}>
+            <SceneLayers
+              layers={[aboveLayer]}
+              tileSize={scene.tileSize}
+              clock={clock}
+              images={sceneImages}
+            />
+          </Group>
+        )}
+        <DragHighlight item={draggedItem} valid={dragValid} {...entityProps} />
       </Canvas>
 
       <DevInventory
-        onPlace={world.placeItem}
+        // Drop new items at the centre of what's currently on screen, not
+        // a fixed map spot - see placeItem's own comment on why.
+        onPlace={(itemId) => {
+          const { roomX, roomY } = toRoomPoint(width / 2, height / 2);
+          world.placeItem(itemId, { x: roomX, y: roomY });
+        }}
         onClear={world.clearItems}
-        deleteMode={deleteMode}
-        onToggleDeleteMode={() => setDeleteMode((current) => !current)}
+        editMode={editMode}
+        onSetEditMode={setEditMode}
         placedCount={world.items.length}
       />
     </View>

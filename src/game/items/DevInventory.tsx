@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { type ItemId, unlockedItems } from "./itemCatalog";
+import type { EditMode } from "./editMode";
 
 /**
  * Throwaway test UI, not the shop. It exists to exercise the item system:
@@ -13,21 +14,35 @@ import { type ItemId, unlockedItems } from "./itemCatalog";
 type DevInventoryProps = {
   onPlace: (itemId: ItemId) => void;
   onClear: () => void;
-  /** Tapping a placed item removes it while this is on. */
-  deleteMode: boolean;
-  onToggleDeleteMode: () => void;
+  /**
+   * "none": tapping/dragging never touches a placed item - it's just tap-
+   * to-walk and camera-drag, same as if there were no furniture at all.
+   * "move": tap-and-drag a placed item to reposition it (see HomeScreen.tsx's
+   * PanResponder and DragHighlight for the yellow/red feedback while doing
+   * so). "delete": tapping a placed item removes it.
+   * Gating item-dragging behind a deliberate mode - rather than always-on,
+   * as it was before - is the fix for touches near a big new item (a
+   * fountain, the plant stand) getting eaten as an accidental grab instead
+   * of a walk, and vice versa.
+   */
+  editMode: EditMode;
+  onSetEditMode: (mode: EditMode) => void;
   placedCount: number;
 };
 
 export const DevInventory = ({
   onPlace,
   onClear,
-  deleteMode,
-  onToggleDeleteMode,
+  editMode,
+  onSetEditMode,
   placedCount,
 }: DevInventoryProps) => {
   const [open, setOpen] = useState(false);
   const items = unlockedItems();
+
+  /** Tapping an already-active mode button turns it back off. */
+  const toggle = (mode: EditMode) =>
+    onSetEditMode(editMode === mode ? "none" : mode);
 
   return (
     <View style={styles.root} pointerEvents="box-none">
@@ -59,11 +74,19 @@ export const DevInventory = ({
           <Text style={styles.buttonText}>{open ? "Close" : "Items"}</Text>
         </Pressable>
         <Pressable
-          style={[styles.button, deleteMode && styles.buttonActive]}
-          onPress={onToggleDeleteMode}
+          style={[styles.button, editMode === "move" && styles.buttonMoveActive]}
+          onPress={() => toggle("move")}
         >
           <Text style={styles.buttonText}>
-            {deleteMode ? "Deleting" : "Delete"}
+            {editMode === "move" ? "Moving" : "Move"}
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.button, editMode === "delete" && styles.buttonActive]}
+          onPress={() => toggle("delete")}
+        >
+          <Text style={styles.buttonText}>
+            {editMode === "delete" ? "Deleting" : "Delete"}
           </Text>
         </Pressable>
         <Pressable style={styles.button} onPress={onClear}>
@@ -125,6 +148,11 @@ const styles = StyleSheet.create({
   },
   buttonActive: {
     backgroundColor: "#a33",
+  },
+  buttonMoveActive: {
+    // The same yellow the in-world drag highlight uses (see
+    // DragHighlight.tsx), so the button and the glow read as one idea.
+    backgroundColor: "#c9971f",
   },
   buttonText: {
     color: "#ffffff",

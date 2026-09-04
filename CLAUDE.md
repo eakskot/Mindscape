@@ -3,18 +3,22 @@
 # Mindscape
 
 A React Native + Expo (SDK 57) + Skia pixel-art app meant to counteract doom-scrolling: a
-character lives in a room you decorate. Art is LimeZu "Modern Interiors" (16x16 variant).
+character lives in a world you decorate. Art is LimeZu "Modern Interiors" (16x16, room/
+character) plus "Modern Exteriors" (16x16, outdoor items) - two separate packs, see Asset facts.
 
 This file is the project's long-term memory. Read it before changing anything.
 
 ## Current state & next steps
 
 Two scenes exist and connect: an outdoor **village** (imported from a Tiled map the user
-maintains outside this repo) and the original indoor **room**, joined by a working door
-portal both ways. Items can be placed via a throwaway dev inventory. That's the whole game
-loop today - **there is no persistence** (everything resets on app restart), **no
-currency/shop** (placing items is free, unlimited), and **no door art** on the room's exit
-wall (it works, nothing is drawn there).
+maintains outside this repo) and the indoor **room**, joined by a working door portal both
+ways. Items are placed via a throwaway dev inventory with a **Move/Delete edit mode**: item
+dragging only happens in that mode, validates against the village's ground layers and against
+every other item (never overlap), and shows a yellow/red highlight while held; the character
+freezes meanwhile. The camera follows the character by default but permanently hands off to
+manual drag-pan until the next deliberate tap-to-walk (see Design decisions). That's the whole
+loop today - **no persistence** (resets on restart), **no currency/shop** (free, unlimited),
+**no door art** on the room's exit wall (works, nothing drawn there).
 
 If picking up this project cold, in priority order:
 1. **Persistence** is the single most valuable next step - it's also a prerequisite for
@@ -40,8 +44,8 @@ If picking up this project cold, in priority order:
 
 ## Stack
 
-Expo SDK 57 · React Native 0.86 · `@shopify/react-native-skia` 2.6 · Reanimated 4.5 +
-react-native-worklets · TypeScript strict. No gesture-handler, no state library, no test runner.
+Versions are in `package.json`. Deliberately no gesture-handler (PanResponder is used
+everywhere), no state library, no test runner — don't add one without deciding to migrate.
 
 ## Running it
 
@@ -60,29 +64,31 @@ must be green before you call anything done.
 ## Architecture
 
 Everything lives under `src/game/`. `App.tsx` is a wrapper; `HomeScreen.tsx` holds which
-scene is active and owns the canvas, the viewport transform and the touch handling for
-whichever one is mounted.
+scene is active and owns the canvas, the viewport transform, edit mode, and all touch
+handling (tap-to-walk, camera-drag, item-drag) for whichever scene is mounted.
 
 | File | Responsibility |
 |---|---|
-| `scene.ts` | The `Scene`/`Tile`/`Portal` shape both the room and the village produce - read this first |
+| `scene.ts` | The `Scene`/`Tile`/`Portal` shape both the room and the village produce - read this first. `placementMask` (optional) restricts where items may stand; `topLayerName` (optional) is drawn above the character/items instead of below |
 | `roomConfig.ts` | The single place the room is described: columns, rows, floorStyle, wallStyle |
 | `tilesets.ts` | Style number → coordinates in a Room_Builder tileset |
 | `roomLayout.ts` | Builds a `Scene` from the config. Knows room shape, not style |
 | `village/villageMap.generated.ts` | **GENERATED** by `scripts/import-village-map.mjs` - never hand-edit |
-| `village/villageLayout.ts` | Builds a `Scene` from the generated village data - decodes Tiled flip/rotate/animation bits here |
-| `Room.tsx` / `Village.tsx` | Load each scene's own tileset images, hand off to `SceneLayers` |
-| `SceneLayers.tsx` | The one tile-layer renderer both scenes share - no per-scene branching |
+| `village/villageLayout.ts` | Builds a `Scene` from the generated village data - decodes Tiled flip/rotate/animation bits and builds `placementMask` here |
+| `Room.tsx` / `Village.tsx` | Hooks (`useRoomImages`/`useVillageImages`) that just load each scene's tileset images - `HomeScreen.tsx` owns the actual `SceneLayers` render calls (split below/above the top layer) |
+| `SceneLayers.tsx` | Draws a given subset of a scene's layers (not necessarily all of them - see `topLayerName`) against one shared animation clock |
 | `atlas.ts` | Shared `<Atlas>` plumbing: rotation, once-per-tileset mirrored image for `flip` tiles, clock-driven buffer for `animationFrames` tiles |
 | `entitySprite.ts` | Shared camera+entity-scale screen-position math (`toScreenPoint`, `snapToDevicePixel`) used by the character and every item |
 | `portals.ts` | Watches the character's position against the active scene's portals; fires a scene switch on a deliberate crossing |
 | `characterSheet.ts` | Sprite-sheet geometry + animation clips |
 | `Character.tsx` | Draws one 16x32 frame |
-| `useCharacter.ts` | Movement, collision and frame timing on the UI thread |
+| `useCharacter.ts` | Movement, collision and frame timing on the UI thread. Optional `frozen` SharedValue holds it still (used during edit mode) |
 | `items/itemCatalog.ts` | Every placeable item, as data |
-| `items/useWorldItems.ts` | Placed items, mutations, collision rects |
-| `items/ItemLayer.tsx` | Layer passes and y-sorting |
-| `items/DevInventory.tsx` | Throwaway test UI, not the shop |
+| `items/useWorldItems.ts` | Placed items, mutations, collision rects, placement validation (`isValidPlacement` against `placementMask`, `overlapsOtherItem`), baseline-priority hit testing (`itemAt`) |
+| `items/ItemLayer.tsx` | Layer passes and y-sorting; exports `EntityProps`, shared with `DragHighlight.tsx` |
+| `items/DragHighlight.tsx` | Yellow/red glow + drop-shadow on the item currently held in move mode |
+| `items/editMode.ts` | The `EditMode` type (`"none" | "move" | "delete"`), shared between `DevInventory` and `HomeScreen` |
+| `items/DevInventory.tsx` | Throwaway test UI, not the shop - placement list + Move/Delete/Clear buttons |
 
 `src/engine/`, `src/stores`, `src/hooks` etc. exist but are **empty** scaffolding. Don't spread
 code across two conventions without deciding to migrate first.
@@ -110,7 +116,9 @@ code across two conventions without deciding to migrate first.
 - **The character and every placed item draw at their own `entityScale`**, outside the tile
   layer's scaled `<Group>` (see `entitySprite.ts`). This is deliberately decoupled from the
   world's own zoom (`worldScale`) so the camera can show more of a scene without shrinking
-  everything drawn in it.
+  everything drawn in it. **Item hit-testing must use this same `entityScale` multiplier** -
+  the catalog's raw `width`/`height` only covers the top-left quadrant of what's actually
+  rendered (see Mistakes #10).
 - **Both the camera and every entity's screen position snap to the device-pixel grid**
   (`entitySprite.ts`'s `snapToDevicePixel`, using `PixelRatio.get()` - not a whole RN point,
   which is several real pixels and snapping to it reads as choppy). Both must snap to the
@@ -120,10 +128,21 @@ code across two conventions without deciding to migrate first.
   `animationFrames`). The renderer (`atlas.ts`/`SceneLayers.tsx`) only ever special-cases on
   those two booleans - up to 4 batched `<Atlas>` calls per (layer, tileset), never one draw
   call per tile.
+- **Camera-drag is a one-way handoff, never auto-resumed.** `followPosition` has no easing -
+  it teleports - so resuming "next frame" or "on the next tap" both read as the screen
+  randomly snapping back onto the character. Once the player pans, the camera stays exactly
+  there until a deliberate tap-to-walk explicitly re-enables following.
+- **Village item placement is gated by `placementMask`**, not just "any of the allowed
+  layers has a tile" - the base `grass` layer sits under fences and houses too, so that
+  naive check reads almost the whole map as valid. It must be "an allowed layer has a tile
+  at this cell AND no other (blocking) layer does" (see `villageLayout.ts`).
+- **Placed items must never overlap** (checked at placement via `findFreeSpot` and at
+  drag-commit via `overlapsOtherItem`) - an overlap silently steals touch priority from
+  whichever item has the lower baseline, which reads as "this item won't move".
 
 ## Asset facts (measured, don't re-derive)
 
-The pack lives at `~/moderninteriors-win`. Its own reference is
+**Modern Interiors** (room, character) lives at `~/moderninteriors-win`. Its own reference is
 `2_Characters/Character_Generator/Spritesheet_animations_GUIDE.png`.
 
 **Character sheets** (`Premade_Character_XX.png`, 896x656): frames are **16 wide x 32 tall**,
@@ -137,6 +156,16 @@ Rows: 1 idle(6) · 2 walk(6) · 3 sleep(6, front only) · 4-5 sit(6, right/left 
 `col % 3`, `row % 2`). Walls are a horizontal 3-slice, two tiles tall (col 0 end cap, 1 seamless
 middle, 2 end cap). Style numbering runs down the leftmost column first; see the generated
 `docs/tile-styles-floors.png` and `docs/tile-styles-walls.png`.
+
+**Modern Exteriors** (outdoor items - fountains, plants, ground-variant tiles) lives at
+`~/modernexteriors-win`. Its `Modern_Exteriors_16x16/ME_Theme_Sorter_16x16/*_Singles_16x16/`
+folders have every tile pre-cut as its own PNG - grep that folder by name instead of
+hand-slicing the big tileset sheet. Fountain sprites ship 4 frames each but are **not** a
+walk-cycle - it's a 2x2 grid (dry/water × silver/gold stone), so only the water+silver frame
+is used as a static sprite (see `itemCatalog.ts`'s own comment). A small ground-variant
+tileset built from this pack (dirt patches + worn-path textures, for painting into the village
+map in Tiled) lives at `~/SERENE_VILLAGE_REVAMPED/maps/ModernExteriors_Ground_Variants_16x16.png`
+- not yet imported into the live map.
 
 ## Mistakes we already made — do not repeat them
 
@@ -182,6 +211,16 @@ middle, 2 end cap). Style numbering runs down the leftmost column first; see the
    Always check `git diff --stat` on the regenerated file before committing; if it contains changes
    you didn't intend, `git checkout --` it back and patch narrowly instead (e.g. with a small script
    that edits just the new field), rather than importing the user's in-progress work without asking.
+10. **Item hit-testing compared a touch against the catalog's raw `width`/`height`,** but items
+    render at `entityScale` (`worldScale × ENTITY_SCALE_MULTIPLIER`, currently 2x) - so only the
+    top-left quadrant of what's actually visible registered a tap. A tap at the visual centre of
+    an item (what a real user does) landed outside the checked box more often than not. `hitTest`/
+    `itemAt` now take the multiplier explicitly and check against `width * multiplier` /
+    `height * multiplier`, matching the box `ItemLayer.tsx` actually draws.
+11. **New-item placement only nudged position by a fixed per-tile step keyed to insertion
+    count,** never checking what was actually occupied - two differently-sized items could
+    coincidentally nudge onto the same spot. `findFreeSpot` now searches outward for a cell
+    that doesn't overlap any existing item (see the overlap design decision above).
 
 ## Rules we follow
 
@@ -191,15 +230,16 @@ middle, 2 end cap). Style numbering runs down the leftmost column first; see the
   not the ceiling; take a screenshot and look at it.
 - **Touch tooling: `idb` is installed** (`idb_companion` + the `idb` CLI, via `brew tap facebook/fb
   && brew install idb-companion` + `pip3 install fb-idb`). Start the companion once per simulator
-  boot (`idb_companion --udid <udid> &`), then `idb ui tap --udid <udid> <x> <y>`. In practice its
-  coordinate space did not line up reliably with either the simulator's points (`idb describe`'s
-  `width_points`/`height_points`) or its raw screenshot pixels in this project - taps landed
-  noticeably off-target even after accounting for both, and pinning down the actual mapping wasn't
-  worth the time. For anything needing a *precise* room-pixel target (e.g. hitting a small trigger
-  zone), prefer seeding state in code (call `walkTo(x, y)` etc. directly from a `// TEMP` effect)
-  over calculating tap coordinates - it is exact and it is what actually caught mistake #7 below.
-  Reach for a real `idb ui tap` only when a genuine touch round-trip (not just a resulting
-  position) is what's being verified, and confirm the target visually before trusting the result.
+  boot (`idb_companion --udid <udid> &`), then `idb ui tap --udid <udid> <x> <y>`. Its coordinates
+  don't line up reliably with the simulator's points or screenshot pixels - taps land off-target.
+  For a *precise* room-pixel target, seed state in code instead (`walkTo(x, y)`, `placeItem(id,
+  center)`, etc. from a `// TEMP` effect) - exact, and what caught mistakes #7 and #10. Reach for
+  a real `idb ui tap`/`swipe` only for a final smoke test, not for iterating, and watch for two
+  failure modes that mimic "the app is broken": (a) after enough taps/swipes, touch can silently
+  stop reaching the app - `xcrun simctl shutdown`+`boot` fixes it; (b) after a simulator reboot,
+  Metro's console.log-forwarding socket can stay disconnected (sometimes with a `WARN ...
+  sharedPackageConnection` line, sometimes silent) while the app keeps running fine - missing log
+  output isn't proof of a bug. Confirm with a screenshot before chasing a phantom.
 - **`runOnJS(console.log)` throws and freezes the whole UI-thread runtime.** Worklets rejects
   passing `console.log` straight to `runOnJS` ("locally defined function passed to scheduleOnRN") -
   the exception silently halts every worklet on that thread, including unrelated `useFrameCallback`
@@ -226,10 +266,32 @@ middle, 2 end cap). Style numbering runs down the leftmost column first; see the
 - Portals live in scene data, not code: `Scene.portals` (a trigger `Bounds` + which scene/spawn it
   leads to). Adding a second room or a garden mainly means giving its `Scene` a portal that points
   back the way it came — `HomeScreen.tsx` doesn't need to change.
+- A new outdoor item type needs a `placementMask`-valid resting spot by construction (the
+  `findFreeSpot` search handles this) - you don't need to hand-pick a legal tile.
+
+## Session efficiency
+
+- Don't re-read a file already read this session unless it changed - the harness already warns
+  when a Read is redundant; trust that instead of re-reading "just in case".
+- Never dump `village/villageMap.generated.ts` or other generated/data files into context wholesale
+  - it's mostly single-line GID arrays. `grep -n 'name: "'` for layer headers, or search for the
+  one field you need.
+- Batch verification: apply a full related set of edits, then one `tsc --noEmit` + one screenshot -
+  not a rebuild/screenshot cycle after every individual line changed.
+- For a multi-file change (a new item type, a new mechanic), list the full set of files/edits
+  before starting, instead of discovering the next needed file mid-edit.
+- Prefer seeding state via a `// TEMP` effect over iterating with `idb ui tap`/`swipe` - it's exact,
+  and idb has repeatedly cost many retries chasing off-target coordinates or a stuck simulator
+  touch state (see Rules' touch-tooling note). Reach for real taps only for a final smoke test.
+- If expected console.log output doesn't show up, don't assume the code is broken - check for the
+  Metro log-forwarding disconnect first (see Rules), and ground-truth with a screenshot before
+  spending more turns on it.
+- Ask before a broad exploratory sweep across `src/` if a narrower, targeted search would answer
+  the question - this repo is small enough that most questions resolve from one or two files plus
+  this doc.
 
 ## For my self (Emil)
 
 Resume this session with `claude --resume` (pick from the list — the ID changes every session,
 not worth hardcoding here). If Claude Code seems unaware of recent context, tell it to read this
 file — it is kept current on purpose, exactly for that.
-

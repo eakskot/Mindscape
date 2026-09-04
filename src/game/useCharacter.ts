@@ -43,6 +43,17 @@ export const useCharacter = (
   walkable: Bounds,
   start: { x: number; y: number },
   tileCollision?: TileCollision,
+  /**
+   * While true, the character holds completely still - no idle wandering,
+   * no progress towards a walkTo target - and its animation reverts to
+   * idle. HomeScreen.tsx sets this during move/delete mode: arranging
+   * furniture is confusing enough without the character (and its collision
+   * footprint) wandering around underneath you the whole time. A plain
+   * ref wouldn't be safely readable here since this runs in a worklet on
+   * the UI thread - see HomeScreen.tsx's own `editModeActive` for why it's
+   * a SharedValue instead.
+   */
+  frozen?: SharedValue<boolean>,
 ) => {
   const x = useSharedValue(start.x);
   const y = useSharedValue(start.y);
@@ -154,6 +165,15 @@ export const useCharacter = (
 
   useFrameCallback((frameInfo) => {
     "worklet";
+    if (frozen?.value) {
+      // Hold still mid-pose rather than mid-stride - reverting to idle
+      // reads as "paused", not "stuck walking in place".
+      if (animation.value !== "idle") {
+        animation.value = "idle";
+      }
+      return;
+    }
+
     // Clamped so a dropped frame does not teleport the character.
     const dt = Math.min((frameInfo.timeSincePreviousFrame ?? 16) / 1000, 0.05);
 

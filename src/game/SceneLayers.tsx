@@ -1,9 +1,9 @@
-import { Atlas, useClock, useImage } from "@shopify/react-native-skia";
+import { Atlas, useImage } from "@shopify/react-native-skia";
 import { useMemo } from "react";
 import type { SharedValue } from "react-native-reanimated";
 
 import { PIXEL_ART, useAnimatedAtlasData, useAtlasData, useFlippedImage } from "./atlas";
-import type { Scene, Tile } from "./scene";
+import type { SceneLayer, Tile } from "./scene";
 
 /**
  * Draws every layer of a Scene. One Atlas per (layer, tileset, animated,
@@ -112,34 +112,45 @@ const SceneLayerAtlas = ({
 };
 
 export const SceneLayers = ({
-  scene,
+  layers,
+  tileSize,
+  clock,
   images,
 }: {
-  scene: Scene;
+  /**
+   * Which of the scene's layers to draw, bottom-to-top - a subset, not
+   * necessarily `scene.layers` in full: HomeScreen.tsx draws the village's
+   * roof layer in a second, later `SceneLayers` call so it paints over the
+   * character and items instead of under them (see `Scene.topLayerName`).
+   */
+  layers: SceneLayer[];
+  tileSize: number;
+  /**
+   * One clock shared by every animated tile across *both* of HomeScreen's
+   * SceneLayers calls, so e.g. a water tile in the below-pass and one in
+   * the above-pass never drift out of sync with each other - each would
+   * otherwise be "in sync since mount" only by coincidence of mounting at
+   * the same moment. Created once by the caller (see HomeScreen.tsx),
+   * rather than here, precisely so both calls can share it.
+   */
+  clock: SharedValue<number>;
   /** Parallel to each layer's tilesByTileset - images[i] is tileset i. */
   images: ReturnType<typeof useImage>[];
-}) => {
-  // One clock shared by every animated tile in the scene, so e.g. two
-  // adjacent water tiles from different layers never drift out of sync
-  // with each other - each would otherwise be "in sync since mount" only
-  // by coincidence of mounting at the same moment.
-  const clock = useClock();
-  return (
-    <>
-      {scene.layers.map((layer) =>
-        layer.tilesByTileset.map(
-          (tiles, tilesetIndex) =>
-            tiles.length > 0 && (
-              <SceneLayerAtlas
-                key={`${layer.name}-${tilesetIndex}`}
-                image={images[tilesetIndex]}
-                tiles={tiles}
-                tileSize={scene.tileSize}
-                clock={clock}
-              />
-            ),
-        ),
-      )}
-    </>
-  );
-};
+}) => (
+  <>
+    {layers.map((layer) =>
+      layer.tilesByTileset.map(
+        (tiles, tilesetIndex) =>
+          tiles.length > 0 && (
+            <SceneLayerAtlas
+              key={`${layer.name}-${tilesetIndex}`}
+              image={images[tilesetIndex]}
+              tiles={tiles}
+              tileSize={tileSize}
+              clock={clock}
+            />
+          ),
+      ),
+    )}
+  </>
+);

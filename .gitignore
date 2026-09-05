@@ -33,6 +33,9 @@ yarn-error.*
 # local env files
 .env*.local
 
+# local inspiration / reference images (not app assets)
+inspiration_*.png
+
 # typescript
 *.tsbuildinfo
 

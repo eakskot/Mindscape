@@ -1,26 +1,46 @@
 /**
  * Shared math for drawing something at a room-pixel position while tracking
- * the live camera, at its own "entity scale" independent of the world's tile
- * scale (`worldScale`). The character and placed items both draw this way -
- * see HomeScreen.tsx's `ENTITY_SCALE_MULTIPLIER`. Without it, zooming the
- * camera out to show more of a scene would shrink everything drawn in that
- * scene too, including things that should stay a comfortable, consistent
- * on-screen size regardless of how much world is visible.
+ * the live camera. The character and placed items both draw this way -
+ * *outside* the world's scaled `<Group>` (see HomeScreen.tsx) - carrying
+ * their own `entityScale`. That scale is locked to the tile scale
+ * (`entityScale = worldScale x ENTITY_SCALE_MULTIPLIER`), so proportions
+ * never shift at any zoom; drawing outside the Group is only so the entity's
+ * scale factor stays a clean multiple of the world's rather than a nested
+ * (and possibly fractional-composed) one.
  *
- * This only carries position - the character (feet-centre anchor, via
+ * This helper only carries position - the character (feet-centre anchor, via
  * RSXform) and items (top-left anchor; static items don't even need RSXform,
  * just a plain `<Image x y width height>`) each still do their own anchoring
  * math on top of the screen point this returns.
  */
+
+import type { SharedValue } from "react-native-reanimated";
+
+/**
+ * The camera/scale quartet every on-canvas entity needs to place itself.
+ * `worldScale`/`entityScale` are shared values (not numbers) because a pinch
+ * drives them continuously between whole numbers - the entity has to scale
+ * in step with the tiles every frame of that, not a React render behind.
+ * `useCamera` produces this; the character, ItemLayer and DragHighlight
+ * consume it. (Kept here rather than in useCamera.ts so the leaf draw
+ * components don't have to import the whole camera hook for one type.)
+ */
+export type EntityProps = {
+  camera: SharedValue<{ x: number; y: number }>;
+  worldScale: SharedValue<number>;
+  entityScale: SharedValue<number>;
+  /** Device pixels per RN point - see toScreenPoint below. */
+  density: number;
+};
 
 /**
  * Rounds to the nearest *device* pixel (1/density of an RN point) instead of
  * the nearest whole point - a point is several real pixels on most screens
  * (3 on this iPhone), so rounding to a whole point is a coarser grid than
  * the screen can actually show, which reads as choppy motion. Shared by
- * `toScreenPoint` below and HomeScreen.tsx's `cameraOffset`, which both
- * snap to this same grid so the tile layer and every entity move together -
- * see either call site for why that matters.
+ * `toScreenPoint` below and useCamera.ts's `followPosition`, which both snap
+ * to this same grid so the tile layer and every entity move together - see
+ * either call site for why that matters.
  */
 export const snapToDevicePixel = (value: number, density: number) => {
   "worklet";

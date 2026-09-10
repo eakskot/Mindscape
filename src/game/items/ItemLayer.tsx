@@ -10,7 +10,7 @@ import {
 import { useDerivedValue, type SharedValue } from "react-native-reanimated";
 
 import { PIXEL_ART } from "../atlas";
-import { toScreenPoint } from "../entitySprite";
+import { toScreenPoint, type EntityProps } from "../entitySprite";
 import {
   ITEM_CATALOG,
   type ItemDefinition,
@@ -34,26 +34,12 @@ import type { ItemImages } from "./itemImages";
  * Only one copy of an item is ever visible, and no React render is needed when
  * the character walks past something.
  *
- * Items draw at their own `entityScale` - the same one the character uses
- * (see entitySprite.ts) - not the world's `worldScale`, so furniture reads as
- * consistent with the character regardless of how zoomed out the camera is.
+ * Items draw at their own `entityScale` (locked to `worldScale` - see
+ * entitySprite.ts), *outside* the world's scaled Group.
  */
 export type LayerPass = "behind" | "front" | "always";
 
-/** Shared with DragHighlight.tsx, which places its glow the same way. */
-export type EntityProps = {
-  camera: SharedValue<{ x: number; y: number }>;
-  /**
-   * Live world/tile and entity scales - shared values, not numbers, because
-   * a pinch drives them continuously between whole numbers (see
-   * HomeScreen.tsx). `entityScale` is `worldScale` x a fixed factor, so
-   * items stay in strict proportion with the tiles at every zoom level.
-   */
-  worldScale: SharedValue<number>;
-  entityScale: SharedValue<number>;
-  /** Device pixels per RN point - see entitySprite.ts's toScreenPoint. */
-  density: number;
-};
+export type { EntityProps };
 
 const StaticSprite = ({
   definition,

@@ -48,14 +48,13 @@ export const baselineOf = (item: PlacedItem) => {
  * Whether a room-pixel point is inside a placed item's *rendered* sprite -
  * for hit testing (tapping/dragging in move or delete mode).
  *
- * `entityScaleMultiplier` must be the same constant HomeScreen.tsx renders
- * items with (its `ENTITY_SCALE_MULTIPLIER`) - items draw at their own
- * `entityScale`, which is `worldScale * entityScaleMultiplier`, deliberately
- * bigger on screen than strict tile proportion (see entitySprite.ts / that
- * constant's own comment). Room-pixel positions like `item.x` and
+ * `entityScaleMultiplier` must be `useCamera.ts`'s `ENTITY_SCALE_MULTIPLIER`
+ * - items draw at their own `entityScale`, which is `worldScale *
+ * entityScaleMultiplier`, deliberately bigger on screen than strict tile
+ * proportion (see entitySprite.ts). Room-pixel positions like `item.x` and
  * `definition.width` are worldScale-space, not entityScale-space, so a
  * sprite's on-screen box - converted back into that same worldScale room-
- * pixel space, the way HomeScreen.tsx's `toRoomPoint` converts a touch -
+ * pixel space, the way useCamera's `toRoomPoint` converts a touch -
  * spans `item.x` to `item.x + width*entityScaleMultiplier`, not
  * `item.x + width`. Comparing against the unmultiplied width (as this once
  * did) only accepted a tap in the box's top-left quadrant - the exact
@@ -378,8 +377,8 @@ export const useWorldItems = (
       roomX: number,
       roomY: number,
       /**
-       * See hitTest's own comment - must be HomeScreen.tsx's
-       * ENTITY_SCALE_MULTIPLIER, the constant items actually render at.
+       * See hitTest's own comment - `useCamera.ts`'s ENTITY_SCALE_MULTIPLIER,
+       * the constant items render at.
        */
       entityScaleMultiplier: number,
     ) => {

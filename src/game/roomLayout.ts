@@ -14,7 +14,7 @@ import { FLOOR_TILESET, TILE, WALL_TILESET, styleOrigin } from "./tilesets";
 /**
  * How many tiles tall the camera aims to show. The room is only 9 rows tall,
  * so this is chosen to fill the *width* of a portrait screen at a sensible
- * integer scale instead - see HomeScreen's cameraOffset, which centres a
+ * integer scale instead - see useCamera.ts's `cameraRange`, which centres a
  * scene smaller than the viewport rather than pinning it to a corner.
  */
 const ROOM_TILES_VISIBLE_TALL = 20;

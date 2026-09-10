@@ -48,6 +48,32 @@ export type SceneLayer = {
   tilesByTileset: Tile[][];
 };
 
+/**
+ * One horizontal strip of free-standing scenery (trees, rocks, bushes) that
+ * must draw in front of or behind the character and placed items depending
+ * on where it stands, instead of always-below (an ordinary SceneLayer) or
+ * always-above (`topLayerName`) - see villageLayout.ts on why a flat CSV
+ * layer can't express this.
+ *
+ * A *band*, not a piece: every scenery tile whose baseline is the same (in
+ * practice, that sits on the same map row) is grouped so the whole strip
+ * draws as one batched `<Atlas>` per tileset and shares one behind/front
+ * decision, Y-sorted against items and the character by `baseline`
+ * (HomeScreen.tsx's combined, pre-sorted list). Grouping by an *exact*
+ * shared baseline keeps this lossless - every tile in the band genuinely
+ * wants the same occlusion result - while collapsing ~1500 single-tile
+ * nodes (each its own draw call and per-frame worklet) down to ~80.
+ */
+export type SceneSceneryBand = {
+  /** The point every tile in this band is Y-sorted against the character by. */
+  baseline: number;
+  /**
+   * Parallel to the scene's tileset images, exactly like SceneLayer's own
+   * field - tilesByTileset[i] draws against tileset image i.
+   */
+  tilesByTileset: Tile[][];
+};
+
 /** Walking into `trigger` switches to `targetScene`, landing at `targetSpawn`. */
 export type Portal = {
   trigger: Bounds;
@@ -68,6 +94,13 @@ export type Scene = {
   preferredTilesVisibleTall: number;
   /** Bottom-to-top draw order. */
   layers: SceneLayer[];
+  /**
+   * Free-standing scenery, pre-grouped into baseline-sorted bands and
+   * Y-sorted against the character and placed items - see SceneSceneryBand.
+   * Omitted (the room) means none; HomeScreen.tsx treats a missing array
+   * the same as empty.
+   */
+  sceneryBands?: SceneSceneryBand[];
   /**
    * Omitted where a scene has no interior obstacles besides its own outer
    * wall - the room's `walkable` box already excludes that, same as before

@@ -15,18 +15,19 @@ import {
 
 import { clamp } from "../../game/bounds";
 import { Character } from "../../game/Character";
+import { type DepthEntity, DepthSortedLayer } from "../../game/DepthSortedLayer";
 import { snapToDevicePixel } from "../../game/entitySprite";
 import { DevInventory } from "../../game/items/DevInventory";
 import { DragHighlight } from "../../game/items/DragHighlight";
 import type { EditMode } from "../../game/items/editMode";
-import { ItemLayer } from "../../game/items/ItemLayer";
-import type { ItemId } from "../../game/items/itemCatalog";
+import { ItemLayer, ItemVisual } from "../../game/items/ItemLayer";
+import { ITEM_CATALOG, type ItemId } from "../../game/items/itemCatalog";
 import { useItemImages } from "../../game/items/itemImages";
-import { useWorldItems } from "../../game/items/useWorldItems";
+import { baselineOf, useWorldItems } from "../../game/items/useWorldItems";
 import { usePortalWatcher } from "../../game/portals";
 import { useRoomImages } from "../../game/Room";
 import { ROOM } from "../../game/roomLayout";
-import { SceneLayers } from "../../game/SceneLayers";
+import { SceneLayers, StaticTileAtlas } from "../../game/SceneLayers";
 import type { Portal, Scene, SceneId } from "../../game/scene";
 import { useCharacter } from "../../game/useCharacter";
 import { useVillageImages } from "../../game/Village";
@@ -210,6 +211,7 @@ function SceneStage({
     scene.tileCollision,
     editModeActive,
   );
+
   const images = useItemImages();
   // Which placed item is currently being held in move mode, for
   // DragHighlight's glow - null the rest of the time (including in delete
@@ -321,6 +323,72 @@ function SceneStage({
   // entitySprite.ts's toScreenPoint. Bundled once so each JSX element below
   // spreads it instead of retyping the same four props five times.
   const entityProps = { camera, worldScale: scale, entityScale, density };
+
+  // Placed `object` items and free-standing scenery (trees, rocks, bushes)
+  // merged into one baseline-sorted list, so DepthSortedLayer's behind/front
+  // toggle resolves their draw order against *each other* as well as against
+  // the character - see that file's own comment on why the two need to go
+  // through the same pass together instead of scenery always drawing above
+  // or below every item regardless of position.
+  //
+  // An item draws through ItemVisual - the same animated/static switch
+  // ItemLayer's own passes use - at entity scale, unwrapped. Scenery is
+  // pre-grouped into per-row bands (see SceneSceneryBand); each band draws
+  // as one batched StaticTileAtlas per tileset (no per-frame worklets - a
+  // tree never animates), at world scale, wrapped in the world's own camera
+  // Group since its tiles' dx/dy are room pixels, not entity-scale ones.
+  const depthEntities = useMemo<DepthEntity[]>(() => {
+    const itemEntities: DepthEntity[] = world.items
+      .filter((item) => ITEM_CATALOG[item.itemId].layer === "object")
+      .map((item) => ({
+        key: `item-${item.instanceId}`,
+        baseline: baselineOf(item),
+        node: (
+          <ItemVisual
+            item={item}
+            image={images[item.itemId]}
+            camera={camera}
+            worldScale={scale}
+            entityScale={entityScale}
+            density={density}
+          />
+        ),
+      }));
+
+    const sceneryEntities: DepthEntity[] = (scene.sceneryBands ?? []).map(
+      (band, index) => ({
+        key: `scenery-band-${index}`,
+        baseline: band.baseline,
+        node: (
+          <Group transform={transform}>
+            {band.tilesByTileset.map((tiles, tilesetIndex) =>
+              tiles.length > 0 ? (
+                <StaticTileAtlas
+                  key={tilesetIndex}
+                  image={sceneImages[tilesetIndex]}
+                  tiles={tiles}
+                  tileSize={scene.tileSize}
+                />
+              ) : null,
+            )}
+          </Group>
+        ),
+      }),
+    );
+
+    return [...itemEntities, ...sceneryEntities].sort((a, b) => a.baseline - b.baseline);
+  }, [
+    world.items,
+    images,
+    camera,
+    scale,
+    entityScale,
+    density,
+    scene.sceneryBands,
+    scene.tileSize,
+    sceneImages,
+    transform,
+  ]);
 
   // The gesture handler is created once and reads current state through refs
   // (and, for the camera, through `camera`'s own live .value), so moving an
@@ -605,14 +673,7 @@ function SceneStage({
           pass="always"
           {...entityProps}
         />
-        <ItemLayer
-          items={world.items}
-          images={images}
-          characterY={y}
-          layer="object"
-          pass="behind"
-          {...entityProps}
-        />
+        <DepthSortedLayer entities={depthEntities} pass="behind" characterY={y} />
         <Character
           x={x}
           y={y}
@@ -620,14 +681,7 @@ function SceneStage({
           row={row}
           {...entityProps}
         />
-        <ItemLayer
-          items={world.items}
-          images={images}
-          characterY={y}
-          layer="object"
-          pass="front"
-          {...entityProps}
-        />
+        <DepthSortedLayer entities={depthEntities} pass="front" characterY={y} />
         <ItemLayer
           items={world.items}
           images={images}

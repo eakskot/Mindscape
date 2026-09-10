@@ -5,7 +5,7 @@
     "file.lastUsedOpenFilter": "Alle Filer (*)",
     "fileStates": {
         "": {
-            "scaleInDock": 0.7098,
+            "scaleInDock": 3.9133,
             "scaleInEditor": 1
         },
         "#Houses_TILESET_B-C-D-E": {
@@ -21,12 +21,15 @@
             "expandedGroupLayers": [
                 9
             ],
-            "scale": 0.5118,
-            "selectedLayer": 8,
+            "scale": 1.2885,
+            "selectedLayer": 6,
             "viewCenter": {
-                "x": 633.0597889800703,
-                "y": 296.9910121141071
+                "x": 685.2929763290648,
+                "y": 621.6530849825378
             }
+        },
+        "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps/map.tmx#Ground_Variants": {
+            "scaleInDock": 3.9133
         },
         "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps/map.tmx#Houses_TILESET_B-C-D-E": {
             "scaleInDock": 0.7098

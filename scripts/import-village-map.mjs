@@ -13,6 +13,16 @@
  * are read here, though, since they live inside each <tileset>'s own XML -
  * not something a per-cell GID decode could ever recover.
  *
+ * Besides plain tile <layer>s, the map has one <objectgroup name="scenery">
+ * holding free-standing "tile objects" (trees, rocks, bushes) - anything
+ * tall enough that it needs to be drawn in front of or behind the character
+ * and placed items depending on where it stands, which a flat CSV layer
+ * can't express (a layer draws entirely below or above everything, never
+ * "depends on position" - see villageLayout.ts's own comment on why these
+ * live outside the ordinary layer stack). Tiled anchors a tile object at
+ * its *bottom-left* corner, unlike a layer cell's top-left, so that gets
+ * undone here too.
+ *
  * Re-run this after editing map.tmx in Tiled:
  *   node scripts/import-village-map.mjs
  *
@@ -144,6 +154,40 @@ if (layers.length === 0) {
   throw new Error("No <layer> entries found in the map.");
 }
 
+/**
+ * The "scenery" object layer: free-standing tile objects (trees, rocks,
+ * bushes) that need to draw in front of or behind the character and items
+ * depending on where they stand - see this file's header comment and
+ * villageLayout.ts. Every object here is a plain, unrotated-container tile
+ * object (`<object gid=... x=... y=... width=... height=...>`), optionally
+ * carrying a `solid` bool property (defaults true if omitted - every object
+ * this importer has ever produced sets it explicitly, but a hand-added one
+ * in Tiled might not).
+ *
+ * Tiled anchors a tile object at its *bottom-left* corner - unlike a layer
+ * cell, which is top-left - so `y` is converted to the sprite's top edge
+ * (`y - height`) here, once, rather than every consumer re-deriving it.
+ */
+const objectGroupRe = /<objectgroup id="\d+" name="scenery"[^>]*>([\s\S]*?)<\/objectgroup>/;
+const objectRe =
+  /<object id="\d+" gid="(\d+)" x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)"\s*(?:\/>|>([\s\S]*?)<\/object>)/g;
+const solidPropertyRe = /<property name="solid" type="bool" value="(true|false)"\s*\/>/;
+
+const sceneryObjects = [];
+const objectGroupMatch = content.match(objectGroupRe);
+if (objectGroupMatch) {
+  for (const m of objectGroupMatch[1].matchAll(objectRe)) {
+    const gid = Number(m[1]);
+    const x = Number(m[2]);
+    const yBottom = Number(m[3]);
+    const height = Number(m[5]);
+    const inner = m[6] ?? "";
+    const solidMatch = inner.match(solidPropertyRe);
+    const solid = solidMatch ? solidMatch[1] === "true" : true;
+    sceneryObjects.push({ gid, x, y: yBottom - height, solid });
+  }
+}
+
 const cropLayer = (gids) => {
   const cropped = new Array(CROP_WIDTH * CROP_HEIGHT);
   for (let row = 0; row < CROP_HEIGHT; row++) {
@@ -156,6 +200,31 @@ const cropLayer = (gids) => {
   }
   return cropped;
 };
+
+/**
+ * Same crop window as cropLayer, but for scenery's free-form pixel
+ * positions instead of a tile grid - keep only objects whose top-left tile
+ * falls inside the window, and shift into the cropped map's own coordinate
+ * space (origin at the crop window's top-left corner) the same way every
+ * layer cell already is.
+ */
+const cropScenery = (objects) =>
+  objects
+    .map((obj) => ({
+      ...obj,
+      col: Math.round(obj.x / TILE) - CROP_ORIGIN_COL,
+      row: Math.round(obj.y / TILE) - CROP_ORIGIN_ROW,
+    }))
+    .filter(
+      (obj) =>
+        obj.col >= 0 && obj.col < CROP_WIDTH && obj.row >= 0 && obj.row < CROP_HEIGHT,
+    )
+    .map((obj) => ({
+      gid: obj.gid,
+      x: obj.col * TILE,
+      y: obj.row * TILE,
+      solid: obj.solid,
+    }));
 
 if (
   SPAWN_COL < CROP_ORIGIN_COL ||
@@ -186,6 +255,7 @@ const croppedLayers = layers.map((layer) => ({
   collision: layer.collision,
   gids: cropLayer(layer.gids),
 }));
+const croppedScenery = cropScenery(sceneryObjects);
 
 const formatGidRow = (gids, row) =>
   gids.slice(row * CROP_WIDTH, row * CROP_WIDTH + CROP_WIDTH).join(",");
@@ -198,6 +268,10 @@ const layersTs = croppedLayers
     }
     return `  {\n    name: "${layer.name}",\n    collision: ${layer.collision},\n    gids: [\n${rows.join("\n")}\n    ],\n  },`;
   })
+  .join("\n");
+
+const scenaryTs = croppedScenery
+  .map((obj) => `  { gid: ${obj.gid}, x: ${obj.x}, y: ${obj.y}, solid: ${obj.solid} },`)
   .join("\n");
 
 const animationsTs = (animations) => {
@@ -276,6 +350,26 @@ export const VILLAGE_LAYERS: VillageLayer[] = [
 ${layersTs}
 ];
 
+export type VillageSceneryInstance = {
+  /** Raw GID, flip bits and all - decoded the same way a layer cell is. */
+  gid: number;
+  /** Top-left of the tile, in cropped-map room pixels (see VillageLayer's own gids). */
+  x: number;
+  y: number;
+  /** Whether the character is blocked by this piece (a rock, a tree trunk). */
+  solid: boolean;
+};
+
+/**
+ * Free-standing scenery (trees, rocks, bushes) that must draw in front of
+ * or behind the character and placed items depending on where it stands -
+ * see this file's own header comment and villageLayout.ts. Unordered: each
+ * instance is Y-sorted at scene-build time, not here.
+ */
+export const VILLAGE_SCENERY: VillageSceneryInstance[] = [
+${scenaryTs}
+];
+
 /** Feet position at the centre of the spawn tile, in local village room pixels. */
 export const VILLAGE_SPAWN = { x: ${spawnX}, y: ${spawnY} };
 `;
@@ -286,3 +380,4 @@ console.log(`Wrote ${OUTPUT_FILE}`);
 console.log(`Copied ${tilesets.length} tileset image(s) to ${ASSETS_TILES_DIR}`);
 console.log(`Crop: ${CROP_WIDTH}x${CROP_HEIGHT} tiles at source (${CROP_ORIGIN_COL},${CROP_ORIGIN_ROW})`);
 console.log(`Spawn: local pixel (${spawnX},${spawnY})`);
+console.log(`Scenery: ${croppedScenery.length} instance(s)`);

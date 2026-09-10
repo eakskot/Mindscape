@@ -111,6 +111,66 @@ const SceneLayerAtlas = ({
   );
 };
 
+/**
+ * A tile group that never animates - drawn once from static source rects,
+ * with no per-frame `useRectBuffer` at all. Scenery bands (see
+ * SceneSceneryBand) go through this rather than SceneLayerAtlas: there are
+ * ~80 of them, and SceneLayerAtlas would allocate two clock-driven buffers
+ * per band for its animated-tile buckets - buckets that are always empty for
+ * trees and rocks - which is ~150 live worklets doing nothing.
+ *
+ * `flip` tiles are still handled (pre-mirrored image, same as
+ * SceneLayerAtlas) since that path is pure `useMemo`. A tile that somehow
+ * carried `animationFrames` would simply draw its first frame - fine for
+ * scenery, which never has any.
+ */
+export const StaticTileAtlas = ({
+  image,
+  tiles,
+  tileSize,
+}: {
+  image: ReturnType<typeof useImage>;
+  tiles: Tile[];
+  tileSize: number;
+}) => {
+  const { plain, mirrored } = useMemo(() => {
+    const plain: Tile[] = [];
+    const mirrored: Tile[] = [];
+    for (const tile of tiles) {
+      (tile.flip ? mirrored : plain).push(tile);
+    }
+    return { plain, mirrored };
+  }, [tiles]);
+
+  const plainAtlas = useAtlasData(plain, tileSize);
+  const flippedImage = useFlippedImage(image ?? null, mirrored.length > 0);
+  const mirroredAtlas = useAtlasData(mirrored, tileSize, image?.width());
+
+  if (!image) {
+    return null;
+  }
+  return (
+    <>
+      {plain.length > 0 && (
+        <Atlas
+          image={image}
+          sprites={plainAtlas.sprites}
+          transforms={plainAtlas.transforms}
+          sampling={PIXEL_ART}
+        />
+      )}
+      {mirrored.length > 0 && flippedImage && (
+        <Atlas
+          image={flippedImage}
+          sprites={mirroredAtlas.sprites}
+          transforms={mirroredAtlas.transforms}
+          sampling={PIXEL_ART}
+        />
+      )}
+    </>
+  );
+};
+
 export const SceneLayers = ({
   layers,
   tileSize,

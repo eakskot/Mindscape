@@ -128,6 +128,30 @@ const AnimatedSprite = ({
   );
 };
 
+/**
+ * Picks the animated-strip or static-image sprite for one item, with no
+ * opacity wrapper of its own. Exported so DepthSortedLayer.tsx's merged
+ * scenery+item depth pass can draw a placed item through the exact same
+ * path this file's own `object`-layer pass does, instead of duplicating the
+ * animated/static switch - see PlacedItemSprite below for the version with
+ * the behind/front opacity trick this file's own layers still use.
+ */
+export const ItemVisual = ({
+  item,
+  image,
+  ...entityProps
+}: {
+  item: PlacedItem;
+  image: SkImage | null;
+} & EntityProps) => {
+  const definition = ITEM_CATALOG[item.itemId];
+  return definition.animation ? (
+    <AnimatedSprite definition={definition} item={item} image={image} {...entityProps} />
+  ) : (
+    <StaticSprite definition={definition} item={item} image={image} {...entityProps} />
+  );
+};
+
 const PlacedItemSprite = ({
   item,
   image,
@@ -140,7 +164,6 @@ const PlacedItemSprite = ({
   pass: LayerPass;
   characterY: SharedValue<number>;
 } & EntityProps) => {
-  const definition = ITEM_CATALOG[item.itemId];
   const baseline = baselineOf(item);
 
   const opacity = useDerivedValue(() => {
@@ -155,21 +178,7 @@ const PlacedItemSprite = ({
 
   return (
     <Group opacity={opacity}>
-      {definition.animation ? (
-        <AnimatedSprite
-          definition={definition}
-          item={item}
-          image={image}
-          {...entityProps}
-        />
-      ) : (
-        <StaticSprite
-          definition={definition}
-          item={item}
-          image={image}
-          {...entityProps}
-        />
-      )}
+      <ItemVisual item={item} image={image} {...entityProps} />
     </Group>
   );
 };

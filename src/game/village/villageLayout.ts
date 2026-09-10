@@ -15,11 +15,12 @@
  */
 
 import { FRAME_WIDTH } from "../characterSheet";
-import type { Scene, SceneLayer, Tile } from "../scene";
+import type { Scene, SceneLayer, SceneSceneryBand, Tile } from "../scene";
 import {
   VILLAGE_COLUMNS,
   VILLAGE_LAYERS,
   VILLAGE_ROWS,
+  VILLAGE_SCENERY,
   VILLAGE_SPAWN,
   VILLAGE_TILE,
   VILLAGE_TILESETS,
@@ -118,33 +119,56 @@ const animationFramesFor = (
 };
 
 /**
+ * A raw GID (flip bits and all) decoded into the tile atlas.ts knows how to
+ * draw, plus which tileset it belongs to - the one piece of per-cell logic
+ * both an ordinary layer cell and a free-standing scenery tile need, so it
+ * lives here once instead of twice.
+ */
+const tileFor = (rawGid: number, column: number, row: number) => {
+  const gid = rawGid & FLIP_MASK;
+  const { rotate, flip } = decodeOrientation(rawGid);
+  const tilesetIndex = resolveTilesetIndex(gid);
+  const tileset = VILLAGE_TILESETS[tilesetIndex];
+  const localIndex = gid - tileset.firstGid;
+  const sourceColumn = localIndex % tileset.columns;
+  const sourceRow = Math.floor(localIndex / tileset.columns);
+  const animationFrames = animationFramesFor(tilesetIndex, tileset, localIndex);
+  const tile: Tile = {
+    sx: sourceColumn * VILLAGE_TILE,
+    sy: sourceRow * VILLAGE_TILE,
+    dx: column * VILLAGE_TILE,
+    dy: row * VILLAGE_TILE,
+    rotate,
+    flip,
+    animationFrames,
+    frameDurationMs: animationFrames
+      ? tileset.animations[localIndex].frameDurationMs
+      : undefined,
+  };
+  return { tile, tilesetIndex };
+};
+
+/**
  * Which of the map's own layers count as valid ground for a placed item -
- * everything else (fences, houses, the top-of-structures roof layer, ...)
- * is off-limits, the same spirit as the tile-collision grid below but for
+ * everything else (fences, houses, scenery's own footprint, ...) is
+ * off-limits, the same spirit as the tile-collision grid below but for
  * "may an item stand here" instead of "may the character stand here". See
  * useWorldItems.ts's `isValidPlacement`.
  *
- * Not a simple "any of these layers has a tile" OR, though - `grass` is the
- * base ground layer and covers nearly the *whole* map, including every
- * tile a fence or house also stands on (they're drawn on top of it, not
- * instead of it). A cell only counts as valid ground if one of these
- * layers has a tile there *and* none of the other (blocking) layers do -
- * see the two-grid pass below.
+ * Not a simple "any of these layers has a tile" OR, though - `ground_grass`
+ * is the base ground layer and covers nearly the *whole* map, including
+ * every tile a fence or house also stands on (they're drawn on top of it,
+ * not instead of it). A cell only counts as valid ground if one of these
+ * layers has a tile there *and* nothing else (another layer, or a piece of
+ * scenery) blocks it - see the two-grid pass below.
  */
 const PLACEMENT_LAYER_NAMES = new Set([
-  "grass",
-  "water_collision",
-  "beach",
-  "paths",
-  "small_extras",
+  "ground_grass",
+  "ground_water_collision",
+  "ground_beach",
+  "ground_paths",
+  "deco_small_extras",
 ]);
-
-/**
- * The one layer that draws *above* items and the character instead of
- * below - the house roofs, so the character walks visibly behind/under
- * them rather than over them. See HomeScreen.tsx's two-pass render.
- */
-const TOP_LAYER_NAME = "top_layer_collision";
 
 const buildVillageLayout = (): Scene => {
   const layers: SceneLayer[] = [];
@@ -167,28 +191,8 @@ const buildVillageLayout = (): Scene => {
         if (rawGid === 0) {
           continue;
         }
-        const gid = rawGid & FLIP_MASK;
-        const { rotate, flip } = decodeOrientation(rawGid);
-
-        const tilesetIndex = resolveTilesetIndex(gid);
-        const tileset = VILLAGE_TILESETS[tilesetIndex];
-        const localIndex = gid - tileset.firstGid;
-        const sourceColumn = localIndex % tileset.columns;
-        const sourceRow = Math.floor(localIndex / tileset.columns);
-        const animationFrames = animationFramesFor(tilesetIndex, tileset, localIndex);
-
-        tilesByTileset[tilesetIndex].push({
-          sx: sourceColumn * VILLAGE_TILE,
-          sy: sourceRow * VILLAGE_TILE,
-          dx: column * VILLAGE_TILE,
-          dy: row * VILLAGE_TILE,
-          rotate,
-          flip,
-          animationFrames,
-          frameDurationMs: animationFrames
-            ? tileset.animations[localIndex].frameDurationMs
-            : undefined,
-        });
+        const { tile, tilesetIndex } = tileFor(rawGid, column, row);
+        tilesByTileset[tilesetIndex].push(tile);
 
         if (isCollisionLayer) {
           grid[row * VILLAGE_COLUMNS + column] = 1;
@@ -204,6 +208,45 @@ const buildVillageLayout = (): Scene => {
     layers.push({ name: layer.name, tilesByTileset });
   }
 
+  // Free-standing scenery (trees, rocks, bushes): each piece blocks the
+  // character (if `solid`, which every one the importer has produced so far
+  // is) and blocks item placement, the same as the tile layers it used to
+  // live in before it moved out to be Y-sorted - see this file's header
+  // comment on why.
+  //
+  // Drawing is banded, not per-piece: every scenery tile on a given map row
+  // shares one baseline (its row's bottom edge), so all of them want the
+  // exact same behind/front result against the character. Grouping them into
+  // one SceneSceneryBand per row turns ~1500 single-tile Skia nodes - each a
+  // draw call and, through SceneLayerAtlas, two per-frame worklets - into
+  // ~80 batched ones, with zero occlusion error since the grouping key *is*
+  // the sort key. Bands are emitted baseline-ascending so HomeScreen.tsx can
+  // merge them with the placed-items list (also baseline-ordered) directly.
+  const bandTilesByRow = new Map<number, Tile[][]>();
+  for (const instance of VILLAGE_SCENERY) {
+    const column = instance.x / VILLAGE_TILE;
+    const row = instance.y / VILLAGE_TILE;
+    const { tile, tilesetIndex } = tileFor(instance.gid, column, row);
+
+    if (instance.solid) {
+      grid[row * VILLAGE_COLUMNS + column] = 1;
+    }
+    blockedGrid[row * VILLAGE_COLUMNS + column] = 1;
+
+    let tilesByTileset = bandTilesByRow.get(row);
+    if (!tilesByTileset) {
+      tilesByTileset = VILLAGE_TILESETS.map(() => []);
+      bandTilesByRow.set(row, tilesByTileset);
+    }
+    tilesByTileset[tilesetIndex].push(tile);
+  }
+  const sceneryBands: SceneSceneryBand[] = [...bandTilesByRow.entries()]
+    .map(([row, tilesByTileset]) => ({
+      baseline: (row + 1) * VILLAGE_TILE,
+      tilesByTileset,
+    }))
+    .sort((a, b) => a.baseline - b.baseline);
+
   const placementGrid = new Uint8Array(VILLAGE_COLUMNS * VILLAGE_ROWS);
   for (let i = 0; i < placementGrid.length; i++) {
     placementGrid[i] = allowedGrid[i] === 1 && blockedGrid[i] === 0 ? 1 : 0;
@@ -217,6 +260,7 @@ const buildVillageLayout = (): Scene => {
     tileSize: VILLAGE_TILE,
     preferredTilesVisibleTall: VILLAGE_TILES_VISIBLE_TALL,
     layers,
+    sceneryBands,
     tileCollision: {
       grid,
       columns: VILLAGE_COLUMNS,
@@ -229,7 +273,18 @@ const buildVillageLayout = (): Scene => {
       rows: VILLAGE_ROWS,
       tileSize: VILLAGE_TILE,
     },
-    topLayerName: TOP_LAYER_NAME,
+    // No dedicated "always draws above the character" layer any more - the
+    // map's old top_layer_collision (what this used to point at) turned out
+    // to hold almost every tree/rock/bush on the map, not the house's roof
+    // as its own name and comment claimed, which is *why* an item placed
+    // near any of them always rendered behind, never in front, regardless
+    // of position (see this scene's own `scenery`, which now Y-sorts them
+    // properly instead). The house's actual roof tiles live in
+    // col_house_collision - a normal below layer, same as its walls -
+    // pending a decision on which specific rows should overhang the
+    // walking path in front of it; give this a real value again once
+    // that's split out into its own layer.
+    topLayerName: undefined,
     width,
     height,
     // The whole map, not an artificial radius - real containment comes from
@@ -259,8 +314,9 @@ const buildVillageLayout = (): Scene => {
         // so this is a designed trigger zone (the first open rows below the
         // wall), not a hole in the collision grid. (An earlier version of
         // this placed the trigger at rows 46-47, which is *inside* the wall
-        // and therefore unreachable - verified precisely against all 5
-        // collision layers this time, not just houses_collision alone.)
+        // and therefore unreachable - verified precisely against the whole
+        // combined collision grid this time, not just the house's own
+        // layer alone.)
         trigger: { minX: 880, maxX: 928, minY: 768, maxY: 800 },
         targetScene: "room",
         // Hardcoded rather than importing ROOM.start, to avoid a circular

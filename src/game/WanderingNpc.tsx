@@ -24,8 +24,8 @@ type WanderingNpcProps = {
   tileSize: number;
   /** The camera/scale/density quartet every on-canvas entity needs. */
   camera: SharedValue<{ x: number; y: number }>;
-  worldScale: number;
-  entityScale: number;
+  worldScale: SharedValue<number>;
+  entityScale: SharedValue<number>;
   density: number;
 };
 

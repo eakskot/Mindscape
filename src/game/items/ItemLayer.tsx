@@ -43,8 +43,14 @@ export type LayerPass = "behind" | "front" | "always";
 /** Shared with DragHighlight.tsx, which places its glow the same way. */
 export type EntityProps = {
   camera: SharedValue<{ x: number; y: number }>;
-  worldScale: number;
-  entityScale: number;
+  /**
+   * Live world/tile and entity scales - shared values, not numbers, because
+   * a pinch drives them continuously between whole numbers (see
+   * HomeScreen.tsx). `entityScale` is `worldScale` x a fixed factor, so
+   * items stay in strict proportion with the tiles at every zoom level.
+   */
+  worldScale: SharedValue<number>;
+  entityScale: SharedValue<number>;
   /** Device pixels per RN point - see entitySprite.ts's toScreenPoint. */
   density: number;
 };
@@ -63,11 +69,11 @@ const StaticSprite = ({
   image: SkImage | null;
 } & EntityProps) => {
   const transform = useDerivedValue(() => {
-    const point = toScreenPoint(item.x, item.y, camera.value, worldScale, density);
+    const point = toScreenPoint(item.x, item.y, camera.value, worldScale.value, density);
     return [
       { translateX: point.x },
       { translateY: point.y },
-      { scale: entityScale },
+      { scale: entityScale.value },
     ];
   });
 
@@ -114,8 +120,8 @@ const AnimatedSprite = ({
   });
   const transforms = useRSXformBuffer(1, (xform) => {
     "worklet";
-    const point = toScreenPoint(item.x, item.y, camera.value, worldScale, density);
-    xform.set(entityScale, 0, point.x, point.y);
+    const point = toScreenPoint(item.x, item.y, camera.value, worldScale.value, density);
+    xform.set(entityScale.value, 0, point.x, point.y);
   });
 
   return (

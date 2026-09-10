@@ -32,15 +32,20 @@ type CharacterProps = {
    * Group transform uses, so the character tracks the camera exactly.
    */
   camera: SharedValue<{ x: number; y: number }>;
-  /** Screen pixels per room pixel for the world (tiles, items). */
-  worldScale: number;
   /**
-   * Screen pixels per sprite pixel for the character - deliberately its own
-   * number, independent of worldScale, so the character can read as bigger
-   * than strict tile-proportion without the world having to zoom in to match.
-   * Both must stay whole numbers - see roomLayout.ts's "Integer scale only".
+   * Screen pixels per room pixel for the world (tiles, items). A shared
+   * value, not a number, because a pinch drives it continuously between
+   * whole numbers (see HomeScreen.tsx) - the character has to scale in step
+   * with the tiles on every frame of that, not one React render behind.
    */
-  entityScale: number;
+  worldScale: SharedValue<number>;
+  /**
+   * Screen pixels per sprite pixel for the character - `worldScale` x a
+   * fixed factor, so the character stays in strict proportion with the tiles
+   * at every zoom level. Whole at rest (see roomLayout.ts's "integer scale
+   * only"); briefly fractional mid-pinch, like worldScale.
+   */
+  entityScale: SharedValue<number>;
   /** Device pixels per RN point - see entitySprite.ts's toScreenPoint. */
   density: number;
   /**
@@ -88,14 +93,10 @@ export const Character = ({
 
   const transforms = useRSXformBuffer(1, (xform) => {
     "worklet";
-    const feet = toScreenPoint(x.value, y.value, camera.value, worldScale, density);
+    const feet = toScreenPoint(x.value, y.value, camera.value, worldScale.value, density);
+    const s = entityScale.value;
     // Anchored by the feet: the bottom centre of the frame sits on `feet`.
-    xform.set(
-      entityScale,
-      0,
-      feet.x - (FRAME_WIDTH * entityScale) / 2,
-      feet.y - FRAME_HEIGHT * entityScale,
-    );
+    xform.set(s, 0, feet.x - (FRAME_WIDTH * s) / 2, feet.y - FRAME_HEIGHT * s);
   });
 
   return (

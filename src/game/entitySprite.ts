@@ -2,10 +2,10 @@
  * Shared math for drawing something at a room-pixel position while tracking
  * the live camera, at its own "entity scale" independent of the world's tile
  * scale (`worldScale`). The character and placed items both draw this way -
- * see HomeScreen.tsx's `ZOOM_LEVELS`, which sets the two scales per zoom
- * level. Decoupling them means zooming the camera out to show more of a
- * scene doesn't shrink everything drawn in it in lockstep, so things that
- * should stay a comfortable on-screen size can.
+ * see HomeScreen.tsx's `ENTITY_SCALE_MULTIPLIER`. Without it, zooming the
+ * camera out to show more of a scene would shrink everything drawn in that
+ * scene too, including things that should stay a comfortable, consistent
+ * on-screen size regardless of how much world is visible.
  *
  * This only carries position - the character (feet-centre anchor, via
  * RSXform) and items (top-left anchor; static items don't even need RSXform,

@@ -40,13 +40,13 @@ export const DragHighlight = ({
 
   const transform = useDerivedValue(() => {
     if (!item) {
-      return [{ translateX: 0 }, { translateY: 0 }, { scale: entityScale }];
+      return [{ translateX: 0 }, { translateY: 0 }, { scale: entityScale.value }];
     }
-    const point = toScreenPoint(item.x, item.y, camera.value, worldScale, density);
+    const point = toScreenPoint(item.x, item.y, camera.value, worldScale.value, density);
     return [
       { translateX: point.x },
       { translateY: point.y },
-      { scale: entityScale },
+      { scale: entityScale.value },
     ];
   });
 

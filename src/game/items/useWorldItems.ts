@@ -48,11 +48,11 @@ export const baselineOf = (item: PlacedItem) => {
  * Whether a room-pixel point is inside a placed item's *rendered* sprite -
  * for hit testing (tapping/dragging in move or delete mode).
  *
- * `entityScaleMultiplier` must be the live `entityScale / worldScale` ratio
- * HomeScreen.tsx renders items at (it varies by zoom level - see
- * ZOOM_LEVELS) - items draw at their own `entityScale`, deliberately bigger
- * on screen than strict tile proportion (see entitySprite.ts). Room-pixel
- * positions like `item.x` and
+ * `entityScaleMultiplier` must be the same constant HomeScreen.tsx renders
+ * items with (its `ENTITY_SCALE_MULTIPLIER`) - items draw at their own
+ * `entityScale`, which is `worldScale * entityScaleMultiplier`, deliberately
+ * bigger on screen than strict tile proportion (see entitySprite.ts / that
+ * constant's own comment). Room-pixel positions like `item.x` and
  * `definition.width` are worldScale-space, not entityScale-space, so a
  * sprite's on-screen box - converted back into that same worldScale room-
  * pixel space, the way HomeScreen.tsx's `toRoomPoint` converts a touch -
@@ -378,9 +378,8 @@ export const useWorldItems = (
       roomX: number,
       roomY: number,
       /**
-       * See hitTest's own comment - must be the live `entityScale : world
-       * scale` ratio the items are currently drawn at (HomeScreen derives it
-       * from the active ZOOM_LEVELS entry).
+       * See hitTest's own comment - must be HomeScreen.tsx's
+       * ENTITY_SCALE_MULTIPLIER, the constant items actually render at.
        */
       entityScaleMultiplier: number,
     ) => {

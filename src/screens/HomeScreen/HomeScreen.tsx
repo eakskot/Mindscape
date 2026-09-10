@@ -48,15 +48,31 @@ const SCENES: Record<SceneId, { scene: Scene; useImages: () => (SkImage | null)[
 };
 
 /**
- * How much bigger than strict tile-proportion the character and placed items
- * are drawn - the same number for both, so furniture reads as consistent
- * with the character rather than shrinking relative to it. Independent of
- * the world's own zoom, so the world can show more surroundings without
- * shrinking everything drawn in it to match. Confirmed against a live
- * scale=20 test that the mechanism scales correctly and proportionally
- * before picking this value - see entitySprite.ts.
+ * Discrete zoom levels, furthest-out first. Each is a `(world, entity)` pair:
+ * the world (tile) scale and the character/item scale - **both whole
+ * numbers**, since a fractional world scale shimmers pixel art (see
+ * roomLayout.ts's "integer scale only") and the entities carry their own
+ * whole-number scale too (see entitySprite.ts).
+ *
+ * A curated list rather than `world x a fixed multiplier`, so the perceived
+ * steps stay even: a rung never doubles the tiles *and* grows the character
+ * at once. The awkward transition is world 1 -> 2 (the ground doubles); L2
+ * keeps the entity scale flat across it, so the eye anchors on the
+ * unchanged character and the step reads as moderate, and L0/L1 then only
+ * grow the character. `entity` tracks roughly `2 x world` once past that.
  */
-const ENTITY_SCALE_MULTIPLIER = 2;
+const ZOOM_LEVELS: { readonly world: number; readonly entity: number }[] = [
+  { world: 1, entity: 1 }, // furthest out - tile-sized character, most map on screen
+  { world: 1, entity: 2 },
+  { world: 2, entity: 2 }, // tiles grow; character keeps its screen size
+  { world: 2, entity: 3 },
+  { world: 2, entity: 4 }, // the standard framing at world scale 2
+  { world: 3, entity: 6 },
+  { world: 4, entity: 8 }, // furthest in
+];
+
+/** Levels crossed per doubling of the pinch spread - higher zooms faster. */
+const ZOOM_PINCH_SENSITIVITY = 3;
 
 /**
  * A touch has to travel at least this many RN points before the
@@ -247,23 +263,36 @@ function SceneStage({
   // - see useCharacter's `controlled`.
   usePortalWatcher(x, y, controlled, scene.portals, onPortal);
 
-  // How many screen pixels one room pixel maps to for the world (tiles only)
-  // - kept separate from the entity scale below (see ENTITY_SCALE_MULTIPLIER).
+  // Zoom: the player pinches between ZOOM_LEVELS (see that list). `scale` is
+  // the world/tile scale, `entityScale` the character/item scale - the two
+  // are deliberately decoupled so the world can show more surroundings
+  // without everything drawn in it shrinking in lockstep.
   //
-  // `baseScale` is the scene's own preferred framing; the player can
-  // pinch-zoom to override it (`zoomScale`) within [minScale, maxScale].
-  // **Integer steps only** - a fractional world scale makes pixel art shimmer
-  // (see roomLayout.ts's "Integer scale only"). `zoomScale` stays null until
-  // the first pinch, and a scene switch remounts this component so it resets.
-  const baseScale = Math.max(
+  // The scene's own preferred framing picks the starting level: the "normal"
+  // look at its world scale (the last ZOOM_LEVELS entry at that scale), or
+  // the nearest world scale in the list. `zoomLevel` stays null until the
+  // first pinch, and a scene switch remounts this component so it resets.
+  const baseWorld = Math.max(
     1,
     Math.floor(height / (scene.tileSize * scene.preferredTilesVisibleTall)),
   );
-  const minScale = Math.max(1, baseScale - 2);
-  const maxScale = baseScale + 3;
-  const [zoomScale, setZoomScale] = useState<number | null>(null);
-  const scale = clamp(zoomScale ?? baseScale, minScale, maxScale);
-  const entityScale = scale * ENTITY_SCALE_MULTIPLIER;
+  const defaultLevel = useMemo(() => {
+    let best = 0;
+    let bestGap = Infinity;
+    ZOOM_LEVELS.forEach((level, i) => {
+      const gap = Math.abs(level.world - baseWorld);
+      // On a tie at the same world scale, take the later (higher-entity) one.
+      if (gap < bestGap || (gap === bestGap && level.world === ZOOM_LEVELS[best].world)) {
+        best = i;
+        bestGap = gap;
+      }
+    });
+    return best;
+  }, [baseWorld]);
+  const [zoomLevel, setZoomLevel] = useState<number | null>(null);
+  const levelIndex = clamp(zoomLevel ?? defaultLevel, 0, ZOOM_LEVELS.length - 1);
+  const scale = ZOOM_LEVELS[levelIndex].world;
+  const entityScale = ZOOM_LEVELS[levelIndex].entity;
 
   const density = PixelRatio.get();
 
@@ -404,14 +433,17 @@ function SceneStage({
   // (and, for the camera, through `camera`'s own live .value), so moving an
   // item mid-drag cannot replace the active responder and touches always
   // convert through the camera's current position, not a stale one from
-  // mount. `scale` only changes on a real resize/rotation (a React render),
-  // so a plain ref is enough.
+  // mount. `scale` / `levelIndex` only change on a real resize/rotation or a
+  // pinch (both a React render), so a plain ref is enough.
   const scaleRef = useRef(scale);
   scaleRef.current = scale;
-  const minScaleRef = useRef(minScale);
-  minScaleRef.current = minScale;
-  const maxScaleRef = useRef(maxScale);
-  maxScaleRef.current = maxScale;
+  const levelIndexRef = useRef(levelIndex);
+  levelIndexRef.current = levelIndex;
+  // The `entityScale : world scale` ratio the item hit-test must match (see
+  // useWorldItems' hitTest and Mistakes #10) - not a constant any more,
+  // since ZOOM_LEVELS varies the two independently.
+  const entityMultiplierRef = useRef(entityScale / scale);
+  entityMultiplierRef.current = entityScale / scale;
   // Same staleness concern as scaleRef - width/height come from
   // useWindowDimensions and can change on rotation, but the PanResponder
   // below is only built once (see the responder's own useMemo).
@@ -448,23 +480,24 @@ function SceneStage({
     startCameraY: number;
     moved: boolean;
   } | null>(null);
-  // Live two-finger pinch: the finger spread and world scale it began at, so
-  // each move re-derives a target integer scale from the absolute ratio (no
+  // Live two-finger pinch: the finger spread and zoom level it began at, so
+  // each move re-derives a target level from the absolute spread ratio (no
   // drift). The point kept fixed under the fingers is the *current* midpoint,
-  // passed per-step to zoomToScale.
+  // passed per-step to zoomToLevel.
   const pinch = useRef<{
     startDist: number;
-    startScale: number;
+    startLevel: number;
   } | null>(null);
   // Set the moment a gesture becomes a pinch, so its release doesn't also
   // fire tap-to-walk. Cleared at the next grant.
   const gestureWasPinch = useRef(false);
-  // A zoom step just changed `scale`; recentre the camera so `focal` stays
-  // put. Applied in an effect, not inline in the gesture, so it runs after
-  // the re-render has pushed the new scale into `transform` - otherwise the
-  // world Group and the camera translate disagree for one frame.
+  // A zoom step just changed the world scale; recentre the camera so `focal`
+  // stays put. Applied in an effect, not inline in the gesture, so it runs
+  // after the re-render has pushed the new scale into `transform` - otherwise
+  // the world Group and the camera translate disagree for one frame. Skipped
+  // when the step only changed the entity scale (prevWorld === scale).
   const pendingZoomFocal = useRef<{
-    prevScale: number;
+    prevWorld: number;
     focalX: number;
     focalY: number;
   } | null>(null);
@@ -475,11 +508,11 @@ function SceneStage({
     // While the camera is following the character it recentres on it every
     // frame at the new scale anyway - the zoom just reads as "toward the
     // character", no focal maths needed.
-    if (!p || following.value) {
+    if (!p || p.prevWorld === scale || following.value) {
       return;
     }
-    const worldX = (p.focalX - camera.value.x) / p.prevScale;
-    const worldY = (p.focalY - camera.value.y) / p.prevScale;
+    const worldX = (p.focalX - camera.value.x) / p.prevWorld;
+    const worldY = (p.focalY - camera.value.y) / p.prevWorld;
     const range = cameraRange(scale, width, height, scene.width, scene.height);
     camera.value = {
       x: snapToDevicePixel(
@@ -494,19 +527,23 @@ function SceneStage({
   }, [scale, camera, following, width, height, scene.width, scene.height, density]);
 
   /**
-   * Snap the world to `nextScale` (already clamped to [minScale, maxScale])
-   * about the pinch centre. Updates `scaleRef` up front so a fast pinch that
+   * Move to `nextLevel` (already clamped to a valid ZOOM_LEVELS index) about
+   * the pinch centre. Updates `levelIndexRef` up front so a fast pinch that
    * fires again before React re-renders still compares against the right
-   * value; the actual `scale` follows on the re-render `setZoomScale` kicks.
+   * value; the render follows on the `setZoomLevel` it kicks.
    */
-  const zoomToScale = (nextScale: number, focalX: number, focalY: number) => {
-    const prevScale = scaleRef.current;
-    if (nextScale === prevScale) {
+  const zoomToLevel = (nextLevel: number, focalX: number, focalY: number) => {
+    const prevLevel = levelIndexRef.current;
+    if (nextLevel === prevLevel) {
       return;
     }
-    pendingZoomFocal.current = { prevScale, focalX, focalY };
-    scaleRef.current = nextScale;
-    setZoomScale(nextScale);
+    pendingZoomFocal.current = {
+      prevWorld: ZOOM_LEVELS[prevLevel].world,
+      focalX,
+      focalY,
+    };
+    levelIndexRef.current = nextLevel;
+    setZoomLevel(nextLevel);
   };
 
   /** Screen point -> room pixels, using the camera's current position. */
@@ -537,7 +574,7 @@ function SceneStage({
           // now only ever happens on purpose, inside a mode you chose.
           const item =
             editModeRef.current !== "none"
-              ? worldRef.current.itemAt(roomX, roomY, ENTITY_SCALE_MULTIPLIER)
+              ? worldRef.current.itemAt(roomX, roomY, entityMultiplierRef.current)
               : undefined;
           if (!item) {
             drag.current = null;
@@ -587,18 +624,22 @@ function SceneStage({
             if (!pinch.current) {
               pan.current = null;
               gestureWasPinch.current = true;
-              pinch.current = { startDist: dist, startScale: scaleRef.current };
+              pinch.current = { startDist: dist, startLevel: levelIndexRef.current };
               return;
             }
+            // Spread ratio -> level delta on a log scale, so a given pinch
+            // moves the same number of levels wherever you start.
             const ratio = dist / pinch.current.startDist;
             const target = clamp(
-              Math.round(pinch.current.startScale * ratio),
-              minScaleRef.current,
-              maxScaleRef.current,
+              Math.round(
+                pinch.current.startLevel + Math.log2(ratio) * ZOOM_PINCH_SENSITIVITY,
+              ),
+              0,
+              ZOOM_LEVELS.length - 1,
             );
             // Keep the *current* finger midpoint fixed, so the zoom tracks
             // where the hand is, not just where the pinch began.
-            zoomToScale(target, focalX, focalY);
+            zoomToLevel(target, focalX, focalY);
             return;
           }
           if (pinch.current) {

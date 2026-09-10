@@ -32,6 +32,7 @@ import type { Portal, Scene, SceneId } from "../../game/scene";
 import { useCharacter } from "../../game/useCharacter";
 import { useVillageImages } from "../../game/Village";
 import { VILLAGE } from "../../game/village/villageLayout";
+import { WanderingNpc } from "../../game/WanderingNpc";
 
 /**
  * Which images to load for each scene's tiles. The scene *data* lives with
@@ -674,6 +675,26 @@ function SceneStage({
           {...entityProps}
         />
         <DepthSortedLayer entities={depthEntities} pass="behind" characterY={y} />
+        {/*
+          The ambient NPC (scenes that have one - see Scene.wanderingNpc)
+          shares the player's paint slot: it's occluded by the same scenery
+          and items the player is, rather than Y-sorting independently. It
+          keeps to a small patch near its spawn, so its baseline stays close
+          to the player's and that approximation holds; a full unified sort
+          of both characters is a later job if it ever needs one. Drawn
+          before the player so the player wins on overlap.
+        */}
+        {scene.wanderingNpc && (
+          <WanderingNpc
+            spawn={scene.wanderingNpc.spawn}
+            obstacles={world.obstacles}
+            walkable={scene.walkable}
+            tileCollision={scene.tileCollision}
+            frozen={editModeActive}
+            tileSize={scene.tileSize}
+            {...entityProps}
+          />
+        )}
         <Character
           x={x}
           y={y}

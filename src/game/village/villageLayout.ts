@@ -261,6 +261,11 @@ const buildVillageLayout = (): Scene => {
     preferredTilesVisibleTall: VILLAGE_TILES_VISIBLE_TALL,
     layers,
     sceneryBands,
+    // An ambient villager who potters about near the spawn/house - just off
+    // the player's own spawn so they don't start stacked. See WanderingNpc.
+    wanderingNpc: {
+      spawn: { x: VILLAGE_SPAWN.x - 20, y: VILLAGE_SPAWN.y - 4 },
+    },
     tileCollision: {
       grid,
       columns: VILLAGE_COLUMNS,

@@ -102,6 +102,13 @@ export type Scene = {
    */
   sceneryBands?: SceneSceneryBand[];
   /**
+   * An ambient character that only wanders - never walked by a tap, never
+   * triggers a portal (see WanderingNpc). The value is where it spawns and
+   * centres its roaming, in room pixels. Omitted = no NPC in this scene
+   * (the room); HomeScreen.tsx just doesn't mount one.
+   */
+  wanderingNpc?: { spawn: { x: number; y: number } };
+  /**
    * Omitted where a scene has no interior obstacles besides its own outer
    * wall - the room's `walkable` box already excludes that, same as before
    * this type existed. The village's is a real imported-terrain grid.

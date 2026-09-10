@@ -3,12 +3,22 @@ import {
   useImage,
   useRSXformBuffer,
   useRectBuffer,
+  type DataSourceParam,
 } from "@shopify/react-native-skia";
 import type { SharedValue } from "react-native-reanimated";
 
 import { PIXEL_ART } from "./atlas";
 import { FRAME_HEIGHT, FRAME_WIDTH } from "./characterSheet";
 import { toScreenPoint } from "./entitySprite";
+
+/**
+ * The player's own skin. Every `Premade_Character_XX.png` in the pack shares
+ * the exact sheet geometry in characterSheet.ts, so an NPC only needs to
+ * pass a different one of these as `sheet` (see NPC_SHEET, HomeScreen.tsx).
+ */
+export const PLAYER_SHEET: DataSourceParam = require("../assets/sprites/player/Premade_Character_03.png");
+/** A visibly different skin (grey hair, glasses) for the wandering NPC. */
+export const NPC_SHEET: DataSourceParam = require("../assets/sprites/player/Premade_Character_20.png");
 
 type CharacterProps = {
   /** Position of the character's feet, in room pixels. */
@@ -33,6 +43,12 @@ type CharacterProps = {
   entityScale: number;
   /** Device pixels per RN point - see entitySprite.ts's toScreenPoint. */
   density: number;
+  /**
+   * Which character sheet to cut frames from. Defaults to the player's skin;
+   * an NPC passes NPC_SHEET. All premade sheets share characterSheet.ts's
+   * geometry, so nothing else changes.
+   */
+  sheet?: DataSourceParam;
 };
 
 /**
@@ -56,10 +72,9 @@ export const Character = ({
   worldScale,
   entityScale,
   density,
+  sheet = PLAYER_SHEET,
 }: CharacterProps) => {
-  const sheet = useImage(
-    require("../assets/sprites/player/Premade_Character_03.png"),
-  );
+  const image = useImage(sheet);
 
   const sprites = useRectBuffer(1, (rect) => {
     "worklet";
@@ -85,7 +100,7 @@ export const Character = ({
 
   return (
     <Atlas
-      image={sheet}
+      image={image}
       sprites={sprites}
       transforms={transforms}
       sampling={PIXEL_ART}

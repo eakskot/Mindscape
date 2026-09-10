@@ -32,11 +32,12 @@ const MIN_STEP = 0.05;
  * Everything about the character lives on the UI thread as shared values, so
  * movement and animation run at display refresh rate without touching React.
  *
- * The character wanders on its own within `walkable`, walks to wherever
- * `walkTo` points it (clamped to the same box), and is blocked by the
- * footprints in `obstacles` (item collision) and, if given, `tileCollision`
- * (imported map terrain). `walkable` and `start` are scene data - the room
- * and the village each pass their own.
+ * The character wanders on its own (within `wanderArea` if given, otherwise
+ * anywhere in `walkable`), walks to wherever `walkTo` points it (always
+ * clamped to `walkable`), and is blocked by the footprints in `obstacles`
+ * (item collision) and, if given, `tileCollision` (imported map terrain).
+ * `walkable` and `start` are scene data - the room and the village each pass
+ * their own.
  */
 export const useCharacter = (
   obstacles: SharedValue<Rect[]>,
@@ -54,6 +55,13 @@ export const useCharacter = (
    * a SharedValue instead.
    */
   frozen?: SharedValue<boolean>,
+  /**
+   * The box the idle wander picks targets in. Defaults to `walkable` (the
+   * whole scene). An NPC passes a smaller box centred on its spawn so it
+   * lingers near one spot instead of trekking across the village and
+   * grinding against every fence and shoreline on the way.
+   */
+  wanderArea?: Bounds,
 ) => {
   const x = useSharedValue(start.x);
   const y = useSharedValue(start.y);
@@ -142,14 +150,14 @@ export const useCharacter = (
     controlled.value = isControlled;
   };
 
+  const wander = wanderArea ?? walkable;
+
   const pickTarget = () => {
     "worklet";
     // A few tries, so a target rarely lands inside furniture.
     for (let attempt = 0; attempt < 12; attempt++) {
-      const nextX =
-        walkable.minX + Math.random() * (walkable.maxX - walkable.minX);
-      const nextY =
-        walkable.minY + Math.random() * (walkable.maxY - walkable.minY);
+      const nextX = wander.minX + Math.random() * (wander.maxX - wander.minX);
+      const nextY = wander.minY + Math.random() * (wander.maxY - wander.minY);
       if (isFree(nextX, nextY)) {
         setTarget(nextX, nextY, false);
         return;

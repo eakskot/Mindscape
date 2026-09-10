@@ -285,18 +285,19 @@ function SceneStage({
     () => worldScale.value * ENTITY_SCALE_MULTIPLIER,
   );
 
-  // The live camera position, in screen pixels. A plain shared value, not a
-  // useDerivedValue, because it needs actual memory: whether it tracks the
-  // character this frame depends on `following` below, which a pure
-  // function of the current inputs can't express - see the frame loop and
-  // `following`'s own comment. Seeded already centred on the spawn point so
-  // there is no first-frame flash at the wrong position. Exposed as its own
-  // shared value (not just baked into `transform` below) so the character
-  // and items - which draw outside the world's Group to get their own scale
-  // - can read the same live camera position too.
-  const camera = useSharedValue(
-    followPosition(spawn.x, spawn.y, baseScale, width, height, scene.width, scene.height, density),
+  // The live camera position, in screen pixels, as two shared values so each
+  // axis can be eased on its own (see settlePinch's withTiming). Plain shared
+  // values, not derived, because whether they track the character this frame
+  // depends on `following` below - a pure function of the current inputs
+  // can't express that. Seeded already centred on the spawn point so there's
+  // no first-frame flash at the wrong position.
+  const seed = followPosition(
+    spawn.x, spawn.y, baseScale, width, height, scene.width, scene.height, density,
   );
+  const cameraX = useSharedValue(seed.x);
+  const cameraY = useSharedValue(seed.y);
+  // The `{x, y}` view of the pair the character, items and `transform` read.
+  const camera = useDerivedValue(() => ({ x: cameraX.value, y: cameraY.value }));
 
   // Whether the camera should keep centring on the character every frame.
   // Starts true (freshly spawned, nothing panned yet); a real camera drag
@@ -328,7 +329,7 @@ function SceneStage({
     if (!following.value || editModeActive.value) {
       return;
     }
-    camera.value = followPosition(
+    const at = followPosition(
       x.value,
       y.value,
       worldScale.value,
@@ -338,11 +339,13 @@ function SceneStage({
       scene.height,
       density,
     );
+    cameraX.value = at.x;
+    cameraY.value = at.y;
   });
 
   const transform = useDerivedValue(() => [
-    { translateX: camera.value.x },
-    { translateY: camera.value.y },
+    { translateX: cameraX.value },
+    { translateY: cameraY.value },
     { scale: worldScale.value },
   ]);
 
@@ -459,42 +462,67 @@ function SceneStage({
   // Set the moment a gesture becomes a pinch, so its release doesn't also
   // fire tap-to-walk. Cleared at the next grant.
   const gestureWasPinch = useRef(false);
+  // The last world point pinned under the finger midpoint, so the settle can
+  // keep it exactly there while the scale eases onto a whole number.
+  const zoomAnchor = useRef<{
+    worldX: number;
+    worldY: number;
+    focalX: number;
+    focalY: number;
+  } | null>(null);
 
-  /**
-   * Set the live world scale to `next` (already clamped) about the pinch
-   * centre `(fx, fy)`, in view pixels. When the camera is following the
-   * character it recentres on it every frame anyway, so the focal maths is
-   * skipped - the zoom just reads as "towards the character". `next` may be
-   * fractional mid-pinch; it's eased onto a whole number on release.
-   */
-  const setWorldScaleAbout = (next: number, fx: number, fy: number) => {
-    const prev = worldScale.value;
-    worldScale.value = next;
-    if (following.value || next === prev) {
-      return;
-    }
-    // Keep the world point under the fingers fixed across the scale change.
-    const worldX = (fx - camera.value.x) / prev;
-    const worldY = (fy - camera.value.y) / prev;
+  /** Camera x/y that puts `worldX,worldY` under `focalX,focalY` at `s`. */
+  const cameraForFocus = (
+    anchor: NonNullable<typeof zoomAnchor.current>,
+    s: number,
+  ) => {
     const range = cameraRange(
-      next,
+      s,
       widthRef.current,
       heightRef.current,
       scene.width,
       scene.height,
     );
-    camera.value = {
-      x: snapToDevicePixel(clamp(fx - worldX * next, range.x.min, range.x.max), density),
-      y: snapToDevicePixel(clamp(fy - worldY * next, range.y.min, range.y.max), density),
+    return {
+      x: snapToDevicePixel(
+        clamp(anchor.focalX - anchor.worldX * s, range.x.min, range.x.max),
+        density,
+      ),
+      y: snapToDevicePixel(
+        clamp(anchor.focalY - anchor.worldY * s, range.y.min, range.y.max),
+        density,
+      ),
     };
   };
 
   /**
-   * End a pinch: ease the world onto the nearest whole scale so the pixel art
-   * is crisp at rest. The settle is short and starts from within half a step,
-   * so the camera drift over it is sub-perceptible - no matching camera
-   * animation needed. (The follow loop keeps the character centred through it
-   * on its own when following.)
+   * Set the live world scale to `next` (already clamped) keeping the world
+   * point under the finger midpoint `(fx, fy)` fixed - i.e. the zoom stays
+   * centred on where the fingers are. Hands camera control off the first
+   * time it actually moves (`following = false`, like a pan), so the follow
+   * loop can't fight the focal lock. `next` may be fractional mid-pinch; the
+   * release settles it.
+   */
+  const setWorldScaleAbout = (next: number, fx: number, fy: number) => {
+    const prev = worldScale.value;
+    if (next === prev) {
+      return;
+    }
+    following.value = false;
+    const worldX = (fx - cameraX.value) / prev;
+    const worldY = (fy - cameraY.value) / prev;
+    zoomAnchor.current = { worldX, worldY, focalX: fx, focalY: fy };
+    worldScale.value = next;
+    const cam = cameraForFocus(zoomAnchor.current, next);
+    cameraX.value = cam.x;
+    cameraY.value = cam.y;
+  };
+
+  /**
+   * End a pinch: ease the world onto the nearest whole scale (so the pixel
+   * art is crisp at rest) *and* the camera to match, together and over the
+   * same short window, so the point under the fingers stays put the whole
+   * way rather than drifting as the scale changes under a static camera.
    */
   const settlePinch = () => {
     const settled = clamp(
@@ -502,17 +530,20 @@ function SceneStage({
       MIN_WORLD_SCALE,
       MAX_WORLD_SCALE,
     );
-    worldScale.value = withTiming(settled, {
-      duration: ZOOM_SETTLE_MS,
-      easing: Easing.out(Easing.quad),
-    });
+    const opts = { duration: ZOOM_SETTLE_MS, easing: Easing.out(Easing.quad) };
+    worldScale.value = withTiming(settled, opts);
+    if (zoomAnchor.current) {
+      const cam = cameraForFocus(zoomAnchor.current, settled);
+      cameraX.value = withTiming(cam.x, opts);
+      cameraY.value = withTiming(cam.y, opts);
+    }
     pinch.current = null;
   };
 
   /** Screen point -> room pixels, using the camera's current position. */
   const toRoomPoint = (locationX: number, locationY: number) => ({
-    roomX: (locationX - camera.value.x) / worldScale.value,
-    roomY: (locationY - camera.value.y) / worldScale.value,
+    roomX: (locationX - cameraX.value) / worldScale.value,
+    roomY: (locationY - cameraY.value) / worldScale.value,
   });
 
   const responder = useMemo(
@@ -544,8 +575,8 @@ function SceneStage({
             pan.current = {
               startX: locationX,
               startY: locationY,
-              startCameraX: camera.value.x,
-              startCameraY: camera.value.y,
+              startCameraX: cameraX.value,
+              startCameraY: cameraY.value,
               moved: false,
             };
             return;
@@ -671,16 +702,14 @@ function SceneStage({
             scene.width,
             scene.height,
           );
-          camera.value = {
-            x: snapToDevicePixel(
-              clamp(panDrag.startCameraX + dx, range.x.min, range.x.max),
-              density,
-            ),
-            y: snapToDevicePixel(
-              clamp(panDrag.startCameraY + dy, range.y.min, range.y.max),
-              density,
-            ),
-          };
+          cameraX.value = snapToDevicePixel(
+            clamp(panDrag.startCameraX + dx, range.x.min, range.x.max),
+            density,
+          );
+          cameraY.value = snapToDevicePixel(
+            clamp(panDrag.startCameraY + dy, range.y.min, range.y.max),
+            density,
+          );
         },
 
         onPanResponderRelease: (event) => {

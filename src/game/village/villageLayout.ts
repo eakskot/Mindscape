@@ -36,7 +36,10 @@ import {
  * chrome sits on top of the scene rather than shrinking it, so this still
  * targets the full screen height.
  */
-export const VILLAGE_TILES_VISIBLE_TALL = 32;
+// The *default* framing (the player can pinch-zoom in HomeScreen). Lower =
+// more zoomed in. 22 puts the base scale at 2x on a typical phone, leaving a
+// clean integer step out (survey the area) and several in (detail).
+export const VILLAGE_TILES_VISIBLE_TALL = 22;
 
 // Tiled encodes each cell's orientation as the top 3 bits of the GID:
 // horizontal flip, vertical flip, diagonal flip (a transpose), applied in

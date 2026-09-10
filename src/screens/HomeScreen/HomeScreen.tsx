@@ -247,13 +247,22 @@ function SceneStage({
   // - see useCharacter's `controlled`.
   usePortalWatcher(x, y, controlled, scene.portals, onPortal);
 
-  // A camera-follow scale for the world (tiles only): how many screen
-  // pixels one room pixel maps to. Kept separate from the entity scale below
-  // - see ENTITY_SCALE_MULTIPLIER.
-  const scale = Math.max(
+  // How many screen pixels one room pixel maps to for the world (tiles only)
+  // - kept separate from the entity scale below (see ENTITY_SCALE_MULTIPLIER).
+  //
+  // `baseScale` is the scene's own preferred framing; the player can
+  // pinch-zoom to override it (`zoomScale`) within [minScale, maxScale].
+  // **Integer steps only** - a fractional world scale makes pixel art shimmer
+  // (see roomLayout.ts's "Integer scale only"). `zoomScale` stays null until
+  // the first pinch, and a scene switch remounts this component so it resets.
+  const baseScale = Math.max(
     1,
     Math.floor(height / (scene.tileSize * scene.preferredTilesVisibleTall)),
   );
+  const minScale = Math.max(1, baseScale - 2);
+  const maxScale = baseScale + 3;
+  const [zoomScale, setZoomScale] = useState<number | null>(null);
+  const scale = clamp(zoomScale ?? baseScale, minScale, maxScale);
   const entityScale = scale * ENTITY_SCALE_MULTIPLIER;
 
   const density = PixelRatio.get();
@@ -399,6 +408,10 @@ function SceneStage({
   // so a plain ref is enough.
   const scaleRef = useRef(scale);
   scaleRef.current = scale;
+  const minScaleRef = useRef(minScale);
+  minScaleRef.current = minScale;
+  const maxScaleRef = useRef(maxScale);
+  maxScaleRef.current = maxScale;
   // Same staleness concern as scaleRef - width/height come from
   // useWindowDimensions and can change on rotation, but the PanResponder
   // below is only built once (see the responder's own useMemo).
@@ -435,6 +448,66 @@ function SceneStage({
     startCameraY: number;
     moved: boolean;
   } | null>(null);
+  // Live two-finger pinch: the finger spread and world scale it began at, so
+  // each move re-derives a target integer scale from the absolute ratio (no
+  // drift). The point kept fixed under the fingers is the *current* midpoint,
+  // passed per-step to zoomToScale.
+  const pinch = useRef<{
+    startDist: number;
+    startScale: number;
+  } | null>(null);
+  // Set the moment a gesture becomes a pinch, so its release doesn't also
+  // fire tap-to-walk. Cleared at the next grant.
+  const gestureWasPinch = useRef(false);
+  // A zoom step just changed `scale`; recentre the camera so `focal` stays
+  // put. Applied in an effect, not inline in the gesture, so it runs after
+  // the re-render has pushed the new scale into `transform` - otherwise the
+  // world Group and the camera translate disagree for one frame.
+  const pendingZoomFocal = useRef<{
+    prevScale: number;
+    focalX: number;
+    focalY: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const p = pendingZoomFocal.current;
+    pendingZoomFocal.current = null;
+    // While the camera is following the character it recentres on it every
+    // frame at the new scale anyway - the zoom just reads as "toward the
+    // character", no focal maths needed.
+    if (!p || following.value) {
+      return;
+    }
+    const worldX = (p.focalX - camera.value.x) / p.prevScale;
+    const worldY = (p.focalY - camera.value.y) / p.prevScale;
+    const range = cameraRange(scale, width, height, scene.width, scene.height);
+    camera.value = {
+      x: snapToDevicePixel(
+        clamp(p.focalX - worldX * scale, range.x.min, range.x.max),
+        density,
+      ),
+      y: snapToDevicePixel(
+        clamp(p.focalY - worldY * scale, range.y.min, range.y.max),
+        density,
+      ),
+    };
+  }, [scale, camera, following, width, height, scene.width, scene.height, density]);
+
+  /**
+   * Snap the world to `nextScale` (already clamped to [minScale, maxScale])
+   * about the pinch centre. Updates `scaleRef` up front so a fast pinch that
+   * fires again before React re-renders still compares against the right
+   * value; the actual `scale` follows on the re-render `setZoomScale` kicks.
+   */
+  const zoomToScale = (nextScale: number, focalX: number, focalY: number) => {
+    const prevScale = scaleRef.current;
+    if (nextScale === prevScale) {
+      return;
+    }
+    pendingZoomFocal.current = { prevScale, focalX, focalY };
+    scaleRef.current = nextScale;
+    setZoomScale(nextScale);
+  };
 
   /** Screen point -> room pixels, using the camera's current position. */
   const toRoomPoint = (locationX: number, locationY: number) => ({
@@ -450,6 +523,9 @@ function SceneStage({
         onMoveShouldSetPanResponder: () => false,
 
         onPanResponderGrant: (event) => {
+          pinch.current = null;
+          gestureWasPinch.current = false;
+
           const { locationX, locationY } = event.nativeEvent;
           const { roomX, roomY } = toRoomPoint(locationX, locationY);
 
@@ -497,6 +573,42 @@ function SceneStage({
         },
 
         onPanResponderMove: (event) => {
+          // Two fingers down anywhere: pinch-zoom, which pre-empts panning
+          // and tap-to-walk. (An item drag in progress wins - two fingers
+          // mid-furniture-drag just isn't a gesture we act on.)
+          const touches = event.nativeEvent.touches;
+          if (touches.length >= 2 && !drag.current) {
+            const [a, b] = touches;
+            const dist = Math.sqrt(
+              (a.locationX - b.locationX) ** 2 + (a.locationY - b.locationY) ** 2,
+            );
+            const focalX = (a.locationX + b.locationX) / 2;
+            const focalY = (a.locationY + b.locationY) / 2;
+            if (!pinch.current) {
+              pan.current = null;
+              gestureWasPinch.current = true;
+              pinch.current = { startDist: dist, startScale: scaleRef.current };
+              return;
+            }
+            const ratio = dist / pinch.current.startDist;
+            const target = clamp(
+              Math.round(pinch.current.startScale * ratio),
+              minScaleRef.current,
+              maxScaleRef.current,
+            );
+            // Keep the *current* finger midpoint fixed, so the zoom tracks
+            // where the hand is, not just where the pinch began.
+            zoomToScale(target, focalX, focalY);
+            return;
+          }
+          if (pinch.current) {
+            // Dropped back below two fingers - end the pinch cleanly. Don't
+            // resurrect a pan from whichever finger is left; wait for a
+            // fresh gesture.
+            pinch.current = null;
+            return;
+          }
+
           const itemDrag = drag.current;
           if (itemDrag) {
             const { locationX, locationY } = event.nativeEvent;
@@ -573,6 +685,14 @@ function SceneStage({
         },
 
         onPanResponderRelease: (event) => {
+          // A pinch this gesture: the lift is the end of a zoom, not a tap.
+          if (gestureWasPinch.current) {
+            gestureWasPinch.current = false;
+            pinch.current = null;
+            pan.current = null;
+            return;
+          }
+
           const itemDrag = drag.current;
           if (itemDrag) {
             const valid =

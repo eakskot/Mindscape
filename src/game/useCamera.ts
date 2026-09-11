@@ -295,9 +295,17 @@ export const useCamera = ({
       following.value = false;
       const worldX = (focalX - cameraX.value) / prev;
       const worldY = (focalY - cameraY.value) / prev;
-      anchor.value = { worldX, worldY, focalX, focalY };
+      // Built once, used twice: `anchor.value = nextAnchor` alone (without
+      // this local) crashed on the very first pinch of a session - reading
+      // `anchor.value` straight back in the same call didn't reliably see an
+      // object-valued shared value's own write yet, only null (the initial
+      // value). Keeping the object in hand sidesteps that round-trip
+      // entirely; `settleZoom` below still reads `anchor.value` later, which
+      // is fine - by then the write is long since visible.
+      const nextAnchor = { worldX, worldY, focalX, focalY };
+      anchor.value = nextAnchor;
       worldScale.value = next;
-      const cam = cameraForFocus(anchor.value, next);
+      const cam = cameraForFocus(nextAnchor, next);
       cameraX.value = cam.x;
       cameraY.value = cam.y;
     },

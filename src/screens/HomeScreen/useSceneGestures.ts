@@ -4,12 +4,7 @@ import { PanResponder } from "react-native";
 import type { EditMode } from "../../game/items/editMode";
 import type { ItemId } from "../../game/items/itemCatalog";
 import type { useWorldItems } from "../../game/items/useWorldItems";
-import {
-  ENTITY_SCALE_MULTIPLIER,
-  MAX_WORLD_SCALE,
-  MIN_WORLD_SCALE,
-  type useCamera,
-} from "../../game/useCamera";
+import { ENTITY_SCALE_MULTIPLIER, type useCamera } from "../../game/useCamera";
 import { clamp } from "../../game/bounds";
 
 /**
@@ -43,7 +38,16 @@ type Args = {
  * be legal" state DragHighlight needs.
  */
 export const useSceneGestures = ({ camera, world, walkTo, editMode }: Args) => {
-  const { toRoomPoint, snapshot, panBy, worldScale, zoomAbout, settleZoom } = camera;
+  const {
+    toRoomPoint,
+    snapshot,
+    panBy,
+    worldScale,
+    minWorldScale,
+    maxWorldScale,
+    zoomAbout,
+    settleZoom,
+  } = camera;
 
   const [draggedInstanceId, setDraggedInstanceId] = useState<string | null>(null);
   const [dragValid, setDragValid] = useState(true);
@@ -156,8 +160,8 @@ export const useSceneGestures = ({ camera, world, walkTo, editMode }: Args) => {
             // settles onto a whole scale on release.
             const next = clamp(
               (pinch.current.startScale * dist) / pinch.current.startDist,
-              MIN_WORLD_SCALE,
-              MAX_WORLD_SCALE,
+              minWorldScale,
+              maxWorldScale,
             );
             zoomAbout(next, focalX, focalY);
             return;
@@ -274,8 +278,18 @@ export const useSceneGestures = ({ camera, world, walkTo, editMode }: Args) => {
           // `following` note. A tap only ever aims the character.
         },
       }),
-    // Every dependency is a stable ref or shared value.
-    [toRoomPoint, snapshot, panBy, worldScale, zoomAbout, settleZoom],
+    // Every dependency is a stable ref/shared value, or (the two scale
+    // bounds) a primitive that's constant for the life of the mount.
+    [
+      toRoomPoint,
+      snapshot,
+      panBy,
+      worldScale,
+      minWorldScale,
+      maxWorldScale,
+      zoomAbout,
+      settleZoom,
+    ],
   );
 
   return {

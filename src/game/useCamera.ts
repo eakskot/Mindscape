@@ -23,9 +23,17 @@ import type { Scene } from "./scene";
  * bug - see the git history around this file's introduction and the
  * pinch-zoom commits):
  *
- * - **Integer world scale at rest.** A fractional tile scale makes pixel art
- *   shimmer. A pinch moves `worldScale` continuously (fractional in between)
- *   and `settleZoom()` eases it onto a whole number on release.
+ * - **Whole *device pixels* per source texel at rest**, not whole RN points.
+ *   A fractional device-pixel scale makes pixel art shimmer - but a "point"
+ *   is `density` device pixels (3 on a typical iPhone), so constraining
+ *   `worldScale` itself (points per room pixel) to a whole number, as this
+ *   used to, was `density`x stricter than the render actually needs: Skia
+ *   rasterises to real device pixels regardless of what unit the app's own
+ *   math uses (the same reason `snapToDevicePixel` exists). `worldScale` is
+ *   only ever settled to `k / density` for a whole `k` - see
+ *   `MIN/MAX_DEVICE_PIXEL_SCALE`. A pinch moves `worldScale` continuously
+ *   (fractional in between, any value) and `settleZoom()` eases it onto the
+ *   nearest such value on release.
  * - **Entity scale is locked to the tile scale** (`entityScale = worldScale
  *   x ENTITY_SCALE_MULTIPLIER`). The character and furniture never change
  *   proportion relative to the world, at any zoom.
@@ -44,9 +52,21 @@ import type { Scene } from "./scene";
 /** Character/furniture screen size = `worldScale` x this. Locked, never its own knob. */
 export const ENTITY_SCALE_MULTIPLIER = 2;
 
-/** The world/tile scale a pinch may reach. 1 is as far out as pixel art allows. */
-export const MIN_WORLD_SCALE = 1;
-export const MAX_WORLD_SCALE = 5;
+/**
+ * The world scale a pinch may reach, expressed as *device pixels per source
+ * texel* (not RN points - see this file's header) so it means the same
+ * thing, and stays exactly as crisp, on every screen density. `MIN = 1` is
+ * the hard floor: one more step out and a source pixel would have to be
+ * *discarded* to fit into less than a device pixel (nearest-neighbour
+ * decimation - moire/missing detail), a different and worse problem than
+ * "uneven" magnification. There is no lower floor to reach for; if the
+ * village ever needs to show more at once than this allows, the fix is a
+ * bigger `preferredTilesVisibleTall` default or letting the camera frame a
+ * region instead of the whole map, not scaling past this point.
+ */
+const MIN_DEVICE_PIXEL_SCALE = 1;
+/** Same ceiling `MAX_WORLD_SCALE = 5` used to give on a 3x-density screen. */
+const MAX_DEVICE_PIXEL_SCALE = 15;
 /** How long the world eases onto a whole scale after a pinch ends. */
 const ZOOM_SETTLE_MS = 130;
 
@@ -132,15 +152,35 @@ export const useCamera = ({
   spawn,
 }: UseCameraArgs) => {
   const density = PixelRatio.get();
-  // The scene's preferred framing, as a whole scale a pinch starts from and
-  // settles towards.
+  // The device-pixel-integer bounds converted into this screen's own point
+  // space - see MIN/MAX_DEVICE_PIXEL_SCALE's own comment. On a typical
+  // iPhone (density 3) minWorldScale lands at 1/3: a village that used to
+  // stop zooming out at "1 point per room pixel" (3 device px per texel,
+  // 3x more magnified than pixel art actually needs) can now go a further
+  // `density`x out, still perfectly crisp.
+  const minWorldScale = MIN_DEVICE_PIXEL_SCALE / density;
+  const maxWorldScale = MAX_DEVICE_PIXEL_SCALE / density;
+
+  // The nearest scale that keeps a whole number of device pixels per texel
+  // is the exact same formula as snapping a *position* to the device-pixel
+  // grid (`snapToDevicePixel`) - both are just "round to the nearest 1/density".
+  const roundToDevicePixelScale = useCallback(
+    (scale: number) => snapToDevicePixel(scale, density),
+    [density],
+  );
+
+  // The scene's preferred framing, as a whole-*point* scale a pinch starts
+  // from and returns towards - deliberately still floored to a whole point,
+  // not the finer device-pixel grid the pinch range now allows, so a
+  // scene's default zoom is unchanged from before this file could go past
+  // 1: only the *reachable range* got bigger, not what you see un-pinched.
   const baseScale = clamp(
     Math.max(
       1,
       Math.floor(height / (scene.tileSize * scene.preferredTilesVisibleTall)),
     ),
-    MIN_WORLD_SCALE,
-    MAX_WORLD_SCALE,
+    minWorldScale,
+    maxWorldScale,
   );
 
   const worldScale = useSharedValue(baseScale);
@@ -313,15 +353,16 @@ export const useCamera = ({
   );
 
   /**
-   * End a pinch: ease the scale onto the nearest whole number (crisp at
-   * rest) *and* the camera to match, over the same window, so the point
-   * under the fingers stays put through the settle instead of drifting.
+   * End a pinch: ease the scale onto the nearest crisp value (see
+   * `roundToDevicePixelScale`) *and* the camera to match, over the same
+   * window, so the point under the fingers stays put through the settle
+   * instead of drifting.
    */
   const settleZoom = useCallback(() => {
     const settled = clamp(
-      Math.round(worldScale.value),
-      MIN_WORLD_SCALE,
-      MAX_WORLD_SCALE,
+      roundToDevicePixelScale(worldScale.value),
+      minWorldScale,
+      maxWorldScale,
     );
     const opts = { duration: ZOOM_SETTLE_MS, easing: Easing.out(Easing.quad) };
     worldScale.value = withTiming(settled, opts);
@@ -330,7 +371,16 @@ export const useCamera = ({
       cameraX.value = withTiming(cam.x, opts);
       cameraY.value = withTiming(cam.y, opts);
     }
-  }, [worldScale, anchor, cameraForFocus, cameraX, cameraY]);
+  }, [
+    worldScale,
+    anchor,
+    cameraForFocus,
+    cameraX,
+    cameraY,
+    roundToDevicePixelScale,
+    minWorldScale,
+    maxWorldScale,
+  ]);
 
   return {
     /** For the world's `<Group transform>` and any Group drawn in world space. */
@@ -339,6 +389,9 @@ export const useCamera = ({
     entityProps,
     /** Live tile scale - the gesture reads `.value` for the pinch ratio. */
     worldScale,
+    /** The pinch range, in the same units as `worldScale` - see this file's header. */
+    minWorldScale,
+    maxWorldScale,
     toRoomPoint,
     snapshot,
     panBy,

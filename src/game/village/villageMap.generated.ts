@@ -1124,9 +1124,6 @@ export const VILLAGE_SCENERY: VillageSceneryInstance[] = [
   { gid: 3582, x: 1008, y: 640, solid: true },
   { gid: 3583, x: 1024, y: 640, solid: true },
   { gid: 3584, x: 1040, y: 640, solid: true },
-  { gid: 3585, x: 1056, y: 640, solid: true, group: "tall_stone_04" },
-  { gid: 3586, x: 1072, y: 640, solid: true, group: "tall_stone_04" },
-  { gid: 3593, x: 1184, y: 640, solid: true, group: "mid_stone_06" },
   { gid: 3594, x: 1200, y: 640, solid: true },
   { gid: 3451, x: 1744, y: 640, solid: true },
   { gid: 3452, x: 1760, y: 640, solid: true, group: "tree_05" },
@@ -2353,7 +2350,7 @@ export const VILLAGE_SCENERY: VillageSceneryInstance[] = [
   { gid: 2699, x: 736, y: 624, solid: true, group: "tall_stone_02" },
   { gid: 2700, x: 752, y: 624, solid: true, group: "tall_stone_02" },
   { gid: 2746, x: 1056, y: 624, solid: true, group: "tall_stone_04" },
-  { gid: 2747, x: 1072, y: 624, solid: true, group: "tall_stone_04" },
+  { gid: 2747, x: 1088, y: 640, solid: true, group: "tall_stone_04" },
   { gid: 2748, x: 1088, y: 624, solid: true, group: "tall_stone_04" },
   { gid: 3883, x: 624, y: 640, solid: true },
   { gid: 3884, x: 640, y: 640, solid: true },
@@ -2536,6 +2533,7 @@ export const VILLAGE_SCENERY: VillageSceneryInstance[] = [
   { gid: 3591, x: 1216, y: 640, solid: true, group: "forest_02" },
   { gid: 3592, x: 1232, y: 640, solid: true, group: "forest_02" },
   { gid: 3593, x: 1248, y: 640, solid: true, group: "forest_02" },
+  { gid: 2747, x: 1072, y: 624, solid: true, group: "tall_stone_04" },
 ];
 
 /** Feet position at the centre of the spawn tile, in local village room pixels. */

@@ -4,6 +4,7 @@ import { PanResponder } from "react-native";
 import type { EditMode } from "../../game/items/editMode";
 import type { ItemId } from "../../game/items/itemCatalog";
 import type { useWorldItems } from "../../game/items/useWorldItems";
+import type { SceneryGroup } from "../../game/scene";
 import { ENTITY_SCALE_MULTIPLIER, type useCamera } from "../../game/useCamera";
 import { clamp } from "../../game/bounds";
 
@@ -19,6 +20,10 @@ type Args = {
   world: ReturnType<typeof useWorldItems>;
   walkTo: (roomX: number, roomY: number) => void;
   editMode: EditMode;
+  /** Currently-visible removable scenery (already filtered for removed ids). */
+  sceneryGroups: SceneryGroup[];
+  selectedSceneryId: string | null;
+  onSelectScenery: (id: string | null) => void;
 };
 
 /**
@@ -37,7 +42,15 @@ type Args = {
  * Returns the pan handlers plus the "which item is held, and would its drop
  * be legal" state DragHighlight needs.
  */
-export const useSceneGestures = ({ camera, world, walkTo, editMode }: Args) => {
+export const useSceneGestures = ({
+  camera,
+  world,
+  walkTo,
+  editMode,
+  sceneryGroups,
+  selectedSceneryId,
+  onSelectScenery,
+}: Args) => {
   const {
     toRoomPoint,
     snapshot,
@@ -59,6 +72,12 @@ export const useSceneGestures = ({ camera, world, walkTo, editMode }: Args) => {
   editModeRef.current = editMode;
   const walkToRef = useRef(walkTo);
   walkToRef.current = walkTo;
+  const sceneryGroupsRef = useRef(sceneryGroups);
+  sceneryGroupsRef.current = sceneryGroups;
+  const selectedSceneryIdRef = useRef(selectedSceneryId);
+  selectedSceneryIdRef.current = selectedSceneryId;
+  const onSelectSceneryRef = useRef(onSelectScenery);
+  onSelectSceneryRef.current = onSelectScenery;
 
   const drag = useRef<{
     instanceId: string;
@@ -86,6 +105,16 @@ export const useSceneGestures = ({ camera, world, walkTo, editMode }: Args) => {
   const pinch = useRef<{ startDist: number; startScale: number } | null>(null);
   // Set the moment a gesture becomes a pinch, so its release isn't a tap too.
   const gestureWasPinch = useRef(false);
+
+  /** Which removable scenery group (if any) a room point lands inside. */
+  const sceneryGroupAt = (roomX: number, roomY: number) =>
+    sceneryGroupsRef.current.find(
+      (group) =>
+        roomX >= group.bounds.minX &&
+        roomX <= group.bounds.maxX &&
+        roomY >= group.bounds.minY &&
+        roomY <= group.bounds.maxY,
+    );
 
   const responder = useMemo(
     () =>
@@ -273,6 +302,25 @@ export const useSceneGestures = ({ camera, world, walkTo, editMode }: Args) => {
 
           const { locationX, locationY } = event.nativeEvent;
           const { roomX, roomY } = toRoomPoint(locationX, locationY);
+
+          // A tap on a removable tree selects it instead of walking there -
+          // tapping the same one again (or empty ground - see below) clears
+          // the selection. Mutually exclusive with tap-to-walk by design:
+          // a tap either aims the character or picks something to remove,
+          // never both, so there's no ambiguity about what a tap near a
+          // tree's edge did.
+          const hit = sceneryGroupAt(roomX, roomY);
+          if (hit) {
+            onSelectSceneryRef.current(
+              hit.id === selectedSceneryIdRef.current ? null : hit.id,
+            );
+            return;
+          }
+          if (selectedSceneryIdRef.current) {
+            onSelectSceneryRef.current(null);
+            return;
+          }
+
           walkToRef.current(roomX, roomY);
           // Deliberately not touching the camera here - see useCamera's
           // `following` note. A tap only ever aims the character.

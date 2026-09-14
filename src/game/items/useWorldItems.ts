@@ -103,7 +103,7 @@ const cellIsValid = (
   if (col < 0 || row < 0 || col >= mask.columns || row >= mask.rows) {
     return false;
   }
-  return mask.grid[row * mask.columns + col] === 1;
+  return mask.grid.value[row * mask.columns + col] === 1;
 };
 
 /** Whether an item of `definition` at `x,y` would overlap `other`'s sprite. */

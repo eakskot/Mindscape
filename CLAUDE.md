@@ -35,10 +35,17 @@ ways. What's in:
 - **Scenery** (trees/rocks/bushes): free-standing, Y-sorted against the character and
   placed items - so you walk *behind* a tree top and *in front* of its trunk. Batched into
   per-map-row bands for performance (see Design decisions).
+- **Removable scenery + a currency HUD**: village scenery Tiled tags with a `group`
+  property (a multi-tile tree, say `tree_04`) becomes a `SceneryGroup` - tap it to select
+  (a highlight + a floating "remove for N" button), confirm to spend currency and remove it
+  for the session (collision/placement clear too). A top-right badge (`useWallet` +
+  `CurrencyHud`) shows the balance, starting at 100. See `village/villageLayout.ts`'s
+  `removeVillageSceneryGroup` and HomeScreen.tsx's `tryRemoveScenery`.
 
-Not in: **no persistence** (everything resets on restart and on a scene switch), **no
-currency/shop**, **no Screen Time integration**, **no navigation** (`App.tsx` mounts
-`HomeScreen` directly), no door art on the room's exit wall.
+Not in: **no persistence** (everything resets on restart and on a scene switch, the wallet
+and removed-scenery set included), **no shop** (currency's only sink today is removing
+scenery), **no Screen Time integration**, **no navigation** (`App.tsx` mounts `HomeScreen`
+directly), no door art on the room's exit wall.
 
 ## Where this is going (read before any big structural change)
 
@@ -55,12 +62,14 @@ un-picked when these land.
    loaded once at startup, saved on change. Pick the storage tech first (`expo-sqlite`,
    `react-native-mmkv`, or `@react-native-async-storage/async-storage` - MMKV is the
    fastest and simplest for a key-value blob; SQLite if the data model grows).
-2. **Currency / wallet.** Once persistence exists. Build it as a module that accepts
-   **accrual from any source** - a `useWallet()` (or store) with `balance`, `accrue(amount,
-   source)`, `spend(amount)`, all persisted. Do **not** couple it to one mechanism: a
-   daily check-in, a timer, and later a Screen-Time threshold event all just call
-   `accrue`. The shop reads `balance` and calls `spend`; unlocking is `itemCatalog`'s job
-   (it already models "unlocked" - see `unlockedItems()`).
+2. **Currency / wallet.** `useWallet()` (`game/economy/`) already exists with `balance`,
+   `accrue(amount, source)`, `spend(amount)` - source-agnostic on purpose, so a daily
+   check-in, a timer, and later a Screen-Time threshold event can all just call `accrue`
+   without this hook changing. Its first (only) spender today is removing scenery
+   (`HomeScreen.tsx`'s `tryRemoveScenery`, a flat cost per group). **Not persisted** - that
+   still needs #1 above; once it lands, `useWallet` is the thing to wire to storage. The
+   eventual shop reads `balance` and calls `spend` the same way; unlocking is
+   `itemCatalog`'s job (it already models "unlocked" - see `unlockedItems()`).
 3. **Screen Time / Family Controls.** Ties rewards to real reduced phone use - the actual
    point. Facts so this doesn't need re-researching:
    - The community package `react-native-device-activity` wraps Apple's
@@ -113,14 +122,14 @@ so tsc + a screenshot is the whole safety net.
 
 | File | Responsibility |
 |---|---|
-| `HomeScreen.tsx` | `HomeScreen` owns which scene is active (a `SCENES` lookup, remounted on portal). `SceneStage` mounts the scene's hooks, composes `depthEntities`, and renders the Canvas. ~300 lines - **keep it composition-only**; new mechanics go in a hook. |
+| `HomeScreen.tsx` | `HomeScreen` owns which scene is active (a `SCENES` lookup, remounted on portal), the wallet, and which scenery has been removed - all above `SceneStage` so a scene switch doesn't reset them. `SceneStage` mounts the scene's hooks, composes `depthEntities` (bands + `SceneryGroup`s + items), and renders the Canvas + the removal prompt. ~440 lines - **keep it composition-only**; new mechanics go in a hook. |
 | `useSceneGestures.ts` | The one `PanResponder` for the view - multiplexes pinch / item-drag / camera-pan / tap-to-walk, built once, reads state through refs + `useCamera`'s live values. Owns the drag-highlight state. |
 
 ### Engine (`src/game/`)
 
 | File | Responsibility |
 |---|---|
-| `scene.ts` | The `Scene` / `Tile` / `Portal` / `SceneSceneryBand` shapes both scenes produce - **read this first**. Optional fields (`sceneryBands`, `wanderingNpc`, `tileCollision`, `placementMask`, `topLayerName`) let a scene opt in to a feature; a scene without one costs nothing. |
+| `scene.ts` | The `Scene` / `Tile` / `Portal` / `SceneSceneryBand` / `SceneryGroup` shapes both scenes produce - **read this first**. Optional fields (`sceneryBands`, `sceneryGroups`, `wanderingNpc`, `tileCollision`, `placementMask`, `topLayerName`) let a scene opt in to a feature; a scene without one costs nothing. |
 | `useCamera.ts` | The camera as a unit: `worldScale` + split `cameraX/cameraY` shared values, `transform`, `entityProps`, the follow frame-loop, and stable methods (`toRoomPoint`, `panBy`, `zoomAbout`, `settleZoom`). Its header lists the rules that must not be reverted. Owns `ENTITY_SCALE_MULTIPLIER` and `MIN/MAX_WORLD_SCALE`. |
 | `useCharacter.ts` | Movement, collision, animation on the UI thread. `frozen` holds it still (edit mode); `wanderArea` pens the idle wander to a box (NPCs). Returns `walkTo` and `controlled` (true only for a tap, so portals ignore idle wandering). |
 | `WanderingNpc.tsx` | An ambient character: a `useCharacter` whose `walkTo` is never called, no portal watcher, a different sheet. A component (not a bare hook call) so its `useFrameCallback` stays out of `SceneStage`. |
@@ -131,11 +140,15 @@ so tsc + a screenshot is the whole safety net.
 | `SceneLayers.tsx` | `SceneLayers` draws a scene's tile layers (batched `<Atlas>` per layer/tileset/flip/animated group). `StaticTileAtlas` is the no-per-frame-worklet variant scenery bands use. |
 | `atlas.ts` | `<Atlas>` plumbing: RSXform for rotation, one mirrored image per tileset for `flip` tiles, clock-driven buffer for `animationFrames` tiles. `PIXEL_ART` sampling. |
 | `portals.ts` | Watches the character against the active scene's portals; fires a scene switch on a deliberate crossing only. |
-| `bounds.ts` | `Bounds`, `TileCollision`, `clamp` - shared shapes. |
+| `bounds.ts` | `Bounds`, `TileCollision`, `clamp` - shared shapes. `TileCollision.grid` is a `SharedValue<Uint8Array>`, not a plain array - see the file's own comment and Design decisions. |
 | `roomConfig.ts` / `roomLayout.ts` / `tilesets.ts` / `Room.tsx` | The procedural room: config is two numbers + styles; layout builds a `Scene`; tilesets map style -> coords; `Room.tsx` loads its images. |
 | `village/villageMap.generated.ts` | **GENERATED** by `scripts/import-village-map.mjs` - never hand-edit. GID arrays, tileset defs, `VILLAGE_SCENERY`, `VILLAGE_SPAWN`. |
-| `village/villageLayout.ts` | Builds the village `Scene` from the generated data: decodes Tiled flip/rotate/animation bits, builds `tileCollision` + `placementMask`, and **bands the scenery by map row**. Sets `wanderingNpc`. |
+| `village/villageLayout.ts` | Builds the village `Scene` from the generated data: decodes Tiled flip/rotate/animation bits, builds `tileCollision` + `placementMask` (SharedValue-backed, see Design decisions), **bands ungrouped scenery by map row**, and turns `group`-tagged scenery into `SceneryGroup`s (splitting a reused group name by physical adjacency - see the file's own `splitCellsIntoClusters`). Exports `removeVillageSceneryGroup`. Sets `wanderingNpc`. |
+| `village/SceneryGroupVisual.tsx` | One `SceneryGroup`'s draw node - its tiles (batched, like a band) plus a selection outline. |
+| `village/SceneryRemovalPrompt.tsx` | The floating "remove for N" button over a selected group - a real `Pressable`, not a Skia draw; tracks the camera via `useAnimatedStyle`. |
 | `Village.tsx` | `useVillageImages` - the hand-written `require()` list for the village's tilesets. **Keep in sync with `VILLAGE_TILESETS`** (see the file's own comment). |
+| `economy/useWallet.ts` | `useWallet()`: `balance`, `accrue(amount, source)`, `spend(amount)` - source-agnostic, not yet persisted. See "Where this is going" #2. |
+| `economy/CurrencyHud.tsx` | The top-right balance badge - presentational only, `HomeScreen.tsx` owns the wallet and passes the number down. |
 | `items/itemCatalog.ts` | Every placeable item as data (size, footprint, layer, animation, `unlocked`). The shop and unlocking are meant to reuse this table unchanged. |
 | `items/useWorldItems.ts` | Placed items: state, mutations, collision rects, `isValidPlacement` / `overlapsOtherItem` / `findFreeSpot`, baseline-priority `itemAt` hit-testing, `serialize`/`restore` (unwired). |
 | `items/ItemLayer.tsx` | `ItemLayer` (the always-under / always-over passes), `ItemVisual` (one item, animated/static switch, used by the depth-sorted pass), `PlacedItemSprite` (with the behind/front toggle). |
@@ -187,9 +200,21 @@ Rendering:
   decision, with **zero occlusion error** (the grouping key *is* the sort key). This
   collapsed ~1500 single-tile nodes (each a draw call + per-frame worklets) down to ~80 -
   the re-imported map rendered **blank** before this, the pipeline couldn't take it.
-- **`depthEntities` is two memos.** `sceneryEntities` is stable per scene; `itemEntities`
-  rebuilds only when `world.items` changes (every frame of a furniture drag). A single
-  memo rebuilt all ~80 band nodes on every drag frame.
+- **`depthEntities` is three memos, not one.** `bandEntities` is stable per scene;
+  `groupEntities` rebuilds on a removal or a selection change (rare); `itemEntities`
+  rebuilds every frame of a furniture drag (`world.items` changes). Merging any of these
+  rebuilds nodes that didn't need to change for the others' sake.
+- **Collision/placement grids that can change at runtime must be `SharedValue`-backed, not
+  a plain array.** A plain `Uint8Array` captured inside a `"worklet"` function gets cloned
+  into the UI-thread runtime once; mutating its bytes on the JS thread afterwards - even
+  from a freshly re-registered `useFrameCallback` - never reaches that clone. This is a
+  real bug we hit: removing a tree correctly cleared the plain grid data (verified against
+  the very same object, on the JS thread), yet the movement worklet kept treating the cell
+  as solid. Fixed by making `TileCollision.grid` a `SharedValue<Uint8Array>` (`makeMutable`,
+  since `VILLAGE` is built outside React) and pushing a **fresh copy** into `.value` on
+  every change - not `.value[i] = x` (silent, no cross-thread sync) and not the
+  mutated-in-place same-reference array (risks a same-reference no-op). See `bounds.ts`'s
+  `TileCollision` comment and `villageLayout.ts`'s `removeVillageSceneryGroup`.
 
 Data / scenes:
 
@@ -233,7 +258,19 @@ git** - path hardcoded as `SOURCE_TMX` in the importer). 120 x 80 tiles, 16px. L
 a `ground_* / deco_* / col_*` naming scheme (`ground_grass`, `ground_water_collision`,
 `ground_beach`, `ground_paths`, `ground_bridges`, `ground_fences_collision`,
 `deco_small_extras`, `col_house_collision`). Trees/rocks/bushes are **not** a layer - the
-importer emits them as `VILLAGE_SCENERY` (~1590 pieces) which `villageLayout` bands.
+importer emits them as `VILLAGE_SCENERY` (~1500 pieces). A tile object tagged with a
+custom `group` string property in Tiled (same value on every tile of one tree/rock) becomes
+a removable `SceneryGroup` instead of joining a row band - see "Current state" and
+`villageLayout.ts`. **A `group` name isn't trusted as globally unique** (confirmed reused
+across unrelated pieces) - `villageLayout.ts` splits it by physical (8-connected) adjacency,
+so this only has to hold within one physical object, not across the whole map. Separately:
+some tiles that read as "part of a tree" visually are actually **baked into an ordinary
+layer** (`ground_fences_collision`, `deco_small_extras` both had GID overlap with scenery)
+or are a **leftover untagged object sitting on the same cell** as a tagged one (found for
+real: a stray single-tile object with its own group name, at the same position as a tile
+already in a different tree's group - one silently painted over the other). Both need a
+Tiled-side fix (re-tag / delete the duplicate), not a code fix - flag it to Emil with exact
+cell coordinates if noticed rather than guessing which one is "correct".
 `topLayerName` is currently `undefined`: the old `top_layer_collision` held almost every
 tree, not the house roof - which is *why* items near trees always rendered behind. Give it
 a real value once the house's overhanging roof rows are split into their own layer.
@@ -285,6 +322,20 @@ pack lives at `~/SERENE_VILLAGE_REVAMPED/maps/ModernExteriors_Ground_Variants_16
     banding scenery per map row (see Design decisions).
 14. **`HomeScreen.tsx` grew to 900 lines** owning scene-mount + camera + gestures + render.
     Split into `useCamera` + `useSceneGestures`. New mechanics go in a hook, not this file.
+15. **A plain `Uint8Array` mutated after being captured in a worklet silently stayed
+    stale on the UI thread** - the collision grid cleared correctly in the JS-thread data
+    (proven), yet the movement worklet kept blocking a removed tree's old footprint. Not
+    obvious from the symptom - it looks exactly like "the removal code is buggy". See
+    Design decisions' SharedValue rule; this is now fixed but the pattern (any grid/array a
+    worklet reads that can change after first render) will recur if a plain array is used
+    again.
+16. **A `// TEMP` test that calls `setState` several times a second to sample a shared
+    value throttles the very thing it's sampling.** `useFrameCallback`'s effect deps are
+    `[callback, autostart]`, and the callback is a fresh closure every render - a state
+    update mid-walk re-renders the component, which re-registers the frame callback,
+    interrupting its own delta-time tracking. A test that repeatedly polls movement this
+    way will show the character "stuck" even when nothing is actually wrong. Sample **once**
+    after a fixed delay instead of on an interval, or the test result is not trustworthy.
 
 ## Rules we follow
 

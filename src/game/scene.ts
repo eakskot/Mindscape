@@ -74,6 +74,28 @@ export type SceneSceneryBand = {
   tilesByTileset: Tile[][];
 };
 
+/**
+ * One removable piece of scenery made of several tile objects tagged with
+ * the same Tiled `group` custom property (a multi-tile tree, typically) -
+ * see villageMap.generated.ts's `VillageSceneryInstance.group` and
+ * villageLayout.ts's `removeVillageSceneryGroup`. Unlike SceneSceneryBand
+ * (which only exists to batch draw calls and is never addressed by id
+ * again), a group keeps enough identity to be hit-tested, highlighted, and
+ * removed as one unit at runtime.
+ */
+export type SceneryGroup = {
+  /** The Tiled `group` property's value, e.g. "tree_04" - stable, author-chosen. */
+  id: string;
+  /** Same convention as SceneSceneryBand.baseline - the bottom of the group's lowest tile. */
+  baseline: number;
+  /** Parallel to the scene's tileset images, same shape as SceneLayer/SceneSceneryBand. */
+  tilesByTileset: Tile[][];
+  /** Room-pixel bounding box of every tile in the group - hit-testing and UI placement. */
+  bounds: { minX: number; minY: number; maxX: number; maxY: number };
+  /** Grid cells the group occupies, so removing it can clear collision/placement precisely. */
+  cells: { column: number; row: number; solid: boolean }[];
+};
+
 /** Walking into `trigger` switches to `targetScene`, landing at `targetSpawn`. */
 export type Portal = {
   trigger: Bounds;
@@ -101,6 +123,13 @@ export type Scene = {
    * the same as empty.
    */
   sceneryBands?: SceneSceneryBand[];
+  /**
+   * Removable scenery - trees (and anything else) tagged with a Tiled
+   * `group` property, individually selectable and deletable at runtime. See
+   * SceneryGroup. Omitted (the room) means none, same spirit as
+   * `sceneryBands`.
+   */
+  sceneryGroups?: SceneryGroup[];
   /**
    * An ambient character that only wanders - never walked by a tap, never
    * triggers a portal (see WanderingNpc). The value is where it spawns and

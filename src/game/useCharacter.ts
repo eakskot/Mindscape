@@ -112,7 +112,7 @@ export const useCharacter = (
       // Off the edge of the imported map - nothing there to stand on.
       return true;
     }
-    return tileCollision.grid[tileRow * tileCollision.columns + col] === 1;
+    return tileCollision.grid.value[tileRow * tileCollision.columns + col] === 1;
   };
 
   /** Can the character's feet stand here? */

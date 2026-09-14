@@ -5,6 +5,8 @@ import { useSharedValue } from "react-native-reanimated";
 
 import { Character } from "../../game/Character";
 import { type DepthEntity, DepthSortedLayer } from "../../game/DepthSortedLayer";
+import { CurrencyHud } from "../../game/economy/CurrencyHud";
+import { useWallet } from "../../game/economy/useWallet";
 import { DevInventory } from "../../game/items/DevInventory";
 import { DragHighlight } from "../../game/items/DragHighlight";
 import type { EditMode } from "../../game/items/editMode";
@@ -20,9 +22,20 @@ import type { Portal, Scene, SceneId } from "../../game/scene";
 import { useCamera } from "../../game/useCamera";
 import { useCharacter } from "../../game/useCharacter";
 import { useVillageImages } from "../../game/Village";
-import { VILLAGE } from "../../game/village/villageLayout";
+import { removeVillageSceneryGroup, VILLAGE } from "../../game/village/villageLayout";
+import { SceneryGroupVisual } from "../../game/village/SceneryGroupVisual";
+import { SceneryRemovalPrompt } from "../../game/village/SceneryRemovalPrompt";
 import { WanderingNpc } from "../../game/WanderingNpc";
 import { useSceneGestures } from "./useSceneGestures";
+
+/**
+ * What removing one scenery group (a tree, a rock cluster - see
+ * villageLayout.ts's SceneryGroup) costs. A flat rate for every group today,
+ * not per-item pricing - simplest thing that works while there's exactly one
+ * thing to spend currency on; revisit if some groups should cost more than
+ * others once there's a reason to (a rare stone vs. a common bush).
+ */
+const SCENERY_REMOVAL_COST = 10;
 
 /**
  * Which images to load for each scene's tiles. The scene *data* lives with
@@ -63,13 +76,52 @@ export default function HomeScreen() {
     setSceneState({ sceneId: portal.targetScene, spawn: portal.targetSpawn });
   }, []);
 
+  // Owned here, not inside SceneStage, so it survives a scene switch (the
+  // same reason `sceneState` lives here) - see useWallet.ts.
+  const wallet = useWallet();
+
+  // Which scenery groups have been removed - same reasoning as the wallet:
+  // owned above SceneStage so walking into the house and back out doesn't
+  // bring a chopped-down tree back. Resets on app restart, same as the
+  // wallet - no persistence layer yet (see CLAUDE.md).
+  const [removedSceneryIds, setRemovedSceneryIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+
+  // The one thing currency currently buys. `removeVillageSceneryGroup`
+  // clears the *village's* collision/placement grids specifically (it's
+  // imported straight from villageLayout.ts, not looked up through `SCENES`
+  // like everything else scene-agnostic here) - fine while it's the only
+  // scene with removable scenery; revisit if a second scene ever needs one.
+  const tryRemoveScenery = useCallback(
+    (id: string) => {
+      if (!wallet.spend(SCENERY_REMOVAL_COST)) {
+        return false;
+      }
+      removeVillageSceneryGroup(id);
+      setRemovedSceneryIds((current) => {
+        const next = new Set(current);
+        next.add(id);
+        return next;
+      });
+      return true;
+    },
+    [wallet],
+  );
+
   return (
-    <SceneStage
-      key={sceneState.sceneId}
-      sceneId={sceneState.sceneId}
-      spawn={sceneState.spawn}
-      onPortal={handlePortal}
-    />
+    <View style={styles.root}>
+      <SceneStage
+        key={sceneState.sceneId}
+        sceneId={sceneState.sceneId}
+        spawn={sceneState.spawn}
+        onPortal={handlePortal}
+        walletBalance={wallet.balance}
+        removedSceneryIds={removedSceneryIds}
+        onRemoveScenery={tryRemoveScenery}
+      />
+      <CurrencyHud balance={wallet.balance} />
+    </View>
   );
 }
 
@@ -77,10 +129,17 @@ function SceneStage({
   sceneId,
   spawn,
   onPortal,
+  walletBalance,
+  removedSceneryIds,
+  onRemoveScenery,
 }: {
   sceneId: SceneId;
   spawn: { x: number; y: number };
   onPortal: (portal: Portal) => void;
+  walletBalance: number;
+  removedSceneryIds: Set<string>;
+  /** Spends the currency and removes the group; false if the spend failed. */
+  onRemoveScenery: (id: string) => boolean;
 }) {
   const { width, height } = useWindowDimensions();
   const { scene, useImages } = SCENES[sceneId];
@@ -123,7 +182,40 @@ function SceneStage({
     spawn,
   });
 
-  const gestures = useSceneGestures({ camera, world, walkTo, editMode });
+  // Which removable scenery (see villageLayout.ts's SceneryGroup) is still
+  // standing, and which one (if any) is currently tapped-and-selected for
+  // removal. `visibleSceneryGroups` re-filters whenever a removal lands -
+  // cheap, there are dozens of groups, not thousands.
+  const visibleSceneryGroups = useMemo(
+    () => (scene.sceneryGroups ?? []).filter((group) => !removedSceneryIds.has(group.id)),
+    [scene.sceneryGroups, removedSceneryIds],
+  );
+  const [selectedSceneryId, setSelectedSceneryId] = useState<string | null>(null);
+  const selectedSceneryGroup =
+    visibleSceneryGroups.find((group) => group.id === selectedSceneryId) ?? null;
+  // A selection can go stale two ways: the group it pointed at just got
+  // removed (by this very tap, via onRemoveScenery), or edit mode opened
+  // underneath it - either way the confirm button shouldn't linger.
+  useEffect(() => {
+    if (selectedSceneryId && !selectedSceneryGroup) {
+      setSelectedSceneryId(null);
+    }
+  }, [selectedSceneryId, selectedSceneryGroup]);
+  useEffect(() => {
+    if (editMode !== "none") {
+      setSelectedSceneryId(null);
+    }
+  }, [editMode]);
+
+  const gestures = useSceneGestures({
+    camera,
+    world,
+    walkTo,
+    editMode,
+    sceneryGroups: visibleSceneryGroups,
+    selectedSceneryId,
+    onSelectScenery: setSelectedSceneryId,
+  });
   const draggedItem =
     world.items.find((item) => item.instanceId === gestures.draggedInstanceId) ??
     null;
@@ -145,16 +237,18 @@ function SceneStage({
   // toggle resolves their draw order against each other as well as against
   // the character - see that file's comment on why they must share a pass.
   //
-  // Split into two memos on purpose: scenery bands never change after the
-  // scene mounts, but `world.items` changes on every frame of a furniture
-  // drag (moveItem writes React state) - a single memo would rebuild all ~80
-  // scenery band nodes each of those frames for nothing.
+  // Split into memos on purpose, by what actually changes each: bands never
+  // change after the scene mounts, groups change on a removal (rare - a
+  // deliberate tap) or a selection change (also rare), and `world.items`
+  // changes on every frame of a furniture drag (moveItem writes React
+  // state). One memo for all of it would rebuild every scenery node on each
+  // of those for nothing.
   //
-  // A scenery band draws as one batched StaticTileAtlas per tileset (no
-  // per-frame worklets - a tree never animates), at world scale, inside the
-  // world's camera Group since its tiles' dx/dy are room pixels. An item
-  // draws through ItemVisual at entity scale, unwrapped.
-  const sceneryEntities = useMemo<DepthEntity[]>(
+  // Both a band and a group draw as one batched StaticTileAtlas per tileset
+  // (no per-frame worklets - scenery never animates), at world scale, inside
+  // the world's camera Group since tile dx/dy are room pixels. An item draws
+  // through ItemVisual at entity scale, unwrapped.
+  const bandEntities = useMemo<DepthEntity[]>(
     () =>
       (scene.sceneryBands ?? []).map((band, index) => ({
         key: `scenery-band-${index}`,
@@ -175,6 +269,33 @@ function SceneStage({
         ),
       })),
     [scene.sceneryBands, scene.tileSize, sceneImages, camera.transform],
+  );
+
+  // Removable groups get their own DepthEntity each (not batched into the
+  // bands above) - there are only dozens of them, and each needs its own
+  // node anyway to carry its own selection highlight. See SceneryGroupVisual.
+  const groupEntities = useMemo<DepthEntity[]>(
+    () =>
+      visibleSceneryGroups.map((group) => ({
+        key: `scenery-group-${group.id}`,
+        baseline: group.baseline,
+        node: (
+          <Group transform={camera.transform}>
+            <SceneryGroupVisual
+              group={group}
+              images={sceneImages}
+              tileSize={scene.tileSize}
+              selected={group.id === selectedSceneryId}
+            />
+          </Group>
+        ),
+      })),
+    [visibleSceneryGroups, sceneImages, scene.tileSize, camera.transform, selectedSceneryId],
+  );
+
+  const sceneryEntities = useMemo<DepthEntity[]>(
+    () => [...bandEntities, ...groupEntities],
+    [bandEntities, groupEntities],
   );
 
   const itemEntities = useMemo<DepthEntity[]>(
@@ -282,6 +403,23 @@ function SceneStage({
         />
       </Canvas>
 
+      {selectedSceneryGroup && (
+        <SceneryRemovalPrompt
+          group={selectedSceneryGroup}
+          cost={SCENERY_REMOVAL_COST}
+          canAfford={walletBalance >= SCENERY_REMOVAL_COST}
+          onConfirm={() => {
+            // onRemoveScenery already no-ops on a failed spend - the button
+            // is disabled in that case anyway (see canAfford), this is just
+            // not trusting the disabled state alone to prevent the call.
+            if (onRemoveScenery(selectedSceneryGroup.id)) {
+              setSelectedSceneryId(null);
+            }
+          }}
+          {...camera.entityProps}
+        />
+      )}
+
       <DevInventory
         // Drop new items at the centre of what's currently on screen.
         onPlace={(itemId) => {
@@ -298,6 +436,9 @@ function SceneStage({
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     backgroundColor: "#15151d",

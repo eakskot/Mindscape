@@ -162,7 +162,16 @@ if (layers.length === 0) {
  * object (`<object gid=... x=... y=... width=... height=...>`), optionally
  * carrying a `solid` bool property (defaults true if omitted - every object
  * this importer has ever produced sets it explicitly, but a hand-added one
- * in Tiled might not).
+ * in Tiled might not), and optionally a `group` string property.
+ *
+ * `group` is how several tile objects that together form one bigger piece
+ * of scenery (a tree drawn as, say, a 2x3 block of individual tiles) say
+ * they're one thing - give every tile in that block the same `group` value
+ * in Tiled (any string, e.g. "tree_04") and whatever eventually removes/
+ * unlocks scenery can act on the whole group at once instead of one tile at
+ * a time. Objects without a `group` property are left ungrouped
+ * (`group: undefined`) - existing single-tile scenery (a rock, a bush) needs
+ * no change.
  *
  * Tiled anchors a tile object at its *bottom-left* corner - unlike a layer
  * cell, which is top-left - so `y` is converted to the sprite's top edge
@@ -172,6 +181,10 @@ const objectGroupRe = /<objectgroup id="\d+" name="scenery"[^>]*>([\s\S]*?)<\/ob
 const objectRe =
   /<object id="\d+" gid="(\d+)" x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)"\s*(?:\/>|>([\s\S]*?)<\/object>)/g;
 const solidPropertyRe = /<property name="solid" type="bool" value="(true|false)"\s*\/>/;
+// Tiled omits `type` for a plain string property (string is the implicit
+// default type - only non-string types like `solid`'s bool get one), so
+// unlike solidPropertyRe this can't require a type attribute.
+const groupPropertyRe = /<property name="group"(?: type="string")? value="([^"]*)"\s*\/>/;
 
 const sceneryObjects = [];
 const objectGroupMatch = content.match(objectGroupRe);
@@ -184,7 +197,9 @@ if (objectGroupMatch) {
     const inner = m[6] ?? "";
     const solidMatch = inner.match(solidPropertyRe);
     const solid = solidMatch ? solidMatch[1] === "true" : true;
-    sceneryObjects.push({ gid, x, y: yBottom - height, solid });
+    const groupMatch = inner.match(groupPropertyRe);
+    const group = groupMatch ? groupMatch[1] : undefined;
+    sceneryObjects.push({ gid, x, y: yBottom - height, solid, group });
   }
 }
 
@@ -224,6 +239,7 @@ const cropScenery = (objects) =>
       x: obj.col * TILE,
       y: obj.row * TILE,
       solid: obj.solid,
+      group: obj.group,
     }));
 
 if (
@@ -271,7 +287,10 @@ const layersTs = croppedLayers
   .join("\n");
 
 const scenaryTs = croppedScenery
-  .map((obj) => `  { gid: ${obj.gid}, x: ${obj.x}, y: ${obj.y}, solid: ${obj.solid} },`)
+  .map((obj) => {
+    const group = obj.group === undefined ? "" : `, group: ${JSON.stringify(obj.group)}`;
+    return `  { gid: ${obj.gid}, x: ${obj.x}, y: ${obj.y}, solid: ${obj.solid}${group} },`;
+  })
   .join("\n");
 
 const animationsTs = (animations) => {
@@ -358,6 +377,16 @@ export type VillageSceneryInstance = {
   y: number;
   /** Whether the character is blocked by this piece (a rock, a tree trunk). */
   solid: boolean;
+  /**
+   * Ties several tile objects into one bigger piece of scenery (e.g. every
+   * tile of a multi-tile tree) - set in Tiled as a custom \`group\` string
+   * property on each tile object, same value for every tile in the group.
+   * Undefined for a plain single-tile piece (a rock, a bush). Read by
+   * villageLayout.ts to build removable SceneryGroups - a reused name is
+   * split by physical adjacency there, so this only has to promise "same
+   * name -> probably one object", not global uniqueness.
+   */
+  group?: string;
 };
 
 /**

@@ -14,8 +14,10 @@
  * unlike the per-item Rect[] list in useWorldItems.ts, which stays small.
  */
 
+import { makeMutable } from "react-native-reanimated";
+
 import { FRAME_WIDTH } from "../characterSheet";
-import type { Scene, SceneLayer, SceneSceneryBand, Tile } from "../scene";
+import type { Scene, SceneLayer, SceneryGroup, SceneSceneryBand, Tile } from "../scene";
 import {
   VILLAGE_COLUMNS,
   VILLAGE_LAYERS,
@@ -171,17 +173,67 @@ const PLACEMENT_LAYER_NAMES = new Set([
   "ground_beach",
   "ground_paths",
   "deco_small_extras",
+  "ground_platform",
 ]);
 
-const buildVillageLayout = (): Scene => {
+/**
+ * Built once, module-level, alongside `VILLAGE` below - see
+ * `removeVillageSceneryGroup`'s own comment on why removal is an imperative
+ * function over these shared buffers rather than something re-derived from
+ * React state.
+ *
+ * `grid`/`placementGrid` here are the plain, cheaply-mutable *working*
+ * copies `recomputeCell` writes into - not what `Scene.tileCollision`/
+ * `placementMask` actually hand out (those are SharedValue-wrapped, built
+ * from a snapshot of these after each change; see the `gridShared`/
+ * `placementGridShared` locals below and bounds.ts's own comment on why a
+ * plain array doesn't work for the movement worklet).
+ */
+type VillageGrids = {
+  grid: Uint8Array;
+  allowedGrid: Uint8Array;
+  placementGrid: Uint8Array;
+  /** Permanent contribution from ordinary tile layers - never changes after build. */
+  layerCollision: Uint8Array;
+  layerBlocked: Uint8Array;
+  /**
+   * Scenery's contribution, as a count rather than a bool: two pieces of
+   * scenery (or a piece of scenery and a baked layer tile - confirmed to
+   * happen, see CLAUDE.md's GID-overlap note) can legitimately occupy the
+   * same cell. Removing one group must not reopen a cell something else is
+   * still standing on, so the combined grid/placementGrid above are only
+   * ever recomputed *from* these counts, never toggled directly.
+   */
+  sceneryCollisionCount: Uint16Array;
+  sceneryBlockCount: Uint16Array;
+};
+
+/** Recomputes cell `index`'s combined grid/placementGrid from its current counts. */
+const recomputeCell = (grids: VillageGrids, index: number) => {
+  grids.grid[index] =
+    grids.layerCollision[index] === 1 || grids.sceneryCollisionCount[index] > 0 ? 1 : 0;
+  const blocked =
+    grids.layerBlocked[index] === 1 || grids.sceneryBlockCount[index] > 0 ? 1 : 0;
+  grids.placementGrid[index] =
+    grids.allowedGrid[index] === 1 && blocked === 0 ? 1 : 0;
+};
+
+const buildVillageLayout = () => {
   const layers: SceneLayer[] = [];
-  const grid = new Uint8Array(VILLAGE_COLUMNS * VILLAGE_ROWS);
-  // Two passes combined after the loop (see PLACEMENT_LAYER_NAMES's own
-  // comment): allowedGrid is "an allowed ground layer has a tile here",
-  // blockedGrid is "some other layer does too" - a cell is only placeable
-  // ground if the former is true and the latter isn't.
-  const allowedGrid = new Uint8Array(VILLAGE_COLUMNS * VILLAGE_ROWS);
-  const blockedGrid = new Uint8Array(VILLAGE_COLUMNS * VILLAGE_ROWS);
+  const cellCount = VILLAGE_COLUMNS * VILLAGE_ROWS;
+  const grids: VillageGrids = {
+    grid: new Uint8Array(cellCount),
+    // Two contributions combined by recomputeCell (see PLACEMENT_LAYER_NAMES's
+    // own comment): allowedGrid is "an allowed ground layer has a tile here",
+    // *Blocked/*BlockCount is "something blocks placement here" - a cell is
+    // only placeable ground if the former is true and the latter isn't.
+    allowedGrid: new Uint8Array(cellCount),
+    placementGrid: new Uint8Array(cellCount),
+    layerCollision: new Uint8Array(cellCount),
+    layerBlocked: new Uint8Array(cellCount),
+    sceneryCollisionCount: new Uint16Array(cellCount),
+    sceneryBlockCount: new Uint16Array(cellCount),
+  };
 
   for (const layer of VILLAGE_LAYERS) {
     const tilesByTileset: Tile[][] = VILLAGE_TILESETS.map(() => []);
@@ -197,13 +249,14 @@ const buildVillageLayout = (): Scene => {
         const { tile, tilesetIndex } = tileFor(rawGid, column, row);
         tilesByTileset[tilesetIndex].push(tile);
 
+        const index = row * VILLAGE_COLUMNS + column;
         if (isCollisionLayer) {
-          grid[row * VILLAGE_COLUMNS + column] = 1;
+          grids.layerCollision[index] = 1;
         }
         if (isPlacementLayer) {
-          allowedGrid[row * VILLAGE_COLUMNS + column] = 1;
+          grids.allowedGrid[index] = 1;
         } else {
-          blockedGrid[row * VILLAGE_COLUMNS + column] = 1;
+          grids.layerBlocked[index] = 1;
         }
       }
     }
@@ -217,24 +270,60 @@ const buildVillageLayout = (): Scene => {
   // live in before it moved out to be Y-sorted - see this file's header
   // comment on why.
   //
-  // Drawing is banded, not per-piece: every scenery tile on a given map row
-  // shares one baseline (its row's bottom edge), so all of them want the
-  // exact same behind/front result against the character. Grouping them into
-  // one SceneSceneryBand per row turns ~1500 single-tile Skia nodes - each a
-  // draw call and, through SceneLayerAtlas, two per-frame worklets - into
-  // ~80 batched ones, with zero occlusion error since the grouping key *is*
-  // the sort key. Bands are emitted baseline-ascending so HomeScreen.tsx can
-  // merge them with the placed-items list (also baseline-ordered) directly.
+  // Split in two by whether Tiled tagged the tile object with a `group`
+  // property (see villageMap.generated.ts's VillageSceneryInstance):
+  //
+  // - Ungrouped pieces (a lone rock, a bush) are banded, not drawn one by
+  //   one: every scenery tile on a given map row shares one baseline (its
+  //   row's bottom edge), so all of them want the exact same behind/front
+  //   result against the character. Grouping them into one SceneSceneryBand
+  //   per row turns ~1500 single-tile Skia nodes - each a draw call and,
+  //   through SceneLayerAtlas, two per-frame worklets - into ~80 batched
+  //   ones, with zero occlusion error since the grouping key *is* the sort
+  //   key. Bands are emitted baseline-ascending so HomeScreen.tsx can merge
+  //   them with the placed-items list (also baseline-ordered) directly.
+  // - Grouped pieces (several tiles making up one tree) become one
+  //   SceneryGroup each instead of joining a row band, so they can be
+  //   hit-tested, highlighted and removed as the one thing they visually
+  //   are - see SceneryGroup and removeVillageSceneryGroup below.
+  //
+  // A Tiled `group` name is only trusted as "these tiles are adjacent" -
+  // not as "this name is used nowhere else on the map". Names get reused
+  // (confirmed: e.g. two unrelated bushes both tagged "bush_07"), so raw
+  // instances are first bucketed by name, then split into one SceneryGroup
+  // per 8-connected cluster within that bucket - splitCellsIntoClusters
+  // below. A name used once still produces exactly one group; nothing
+  // changes for the common case.
   const bandTilesByRow = new Map<number, Tile[][]>();
+  type RawSceneryCell = {
+    column: number;
+    row: number;
+    solid: boolean;
+    tile: Tile;
+    tilesetIndex: number;
+  };
+  const rawCellsByGroupName = new Map<string, RawSceneryCell[]>();
+
   for (const instance of VILLAGE_SCENERY) {
     const column = instance.x / VILLAGE_TILE;
     const row = instance.y / VILLAGE_TILE;
     const { tile, tilesetIndex } = tileFor(instance.gid, column, row);
+    const index = row * VILLAGE_COLUMNS + column;
 
     if (instance.solid) {
-      grid[row * VILLAGE_COLUMNS + column] = 1;
+      grids.sceneryCollisionCount[index] += 1;
     }
-    blockedGrid[row * VILLAGE_COLUMNS + column] = 1;
+    grids.sceneryBlockCount[index] += 1;
+
+    if (instance.group) {
+      let cells = rawCellsByGroupName.get(instance.group);
+      if (!cells) {
+        cells = [];
+        rawCellsByGroupName.set(instance.group, cells);
+      }
+      cells.push({ column, row, solid: instance.solid, tile, tilesetIndex });
+      continue;
+    }
 
     let tilesByTileset = bandTilesByRow.get(row);
     if (!tilesByTileset) {
@@ -243,6 +332,7 @@ const buildVillageLayout = (): Scene => {
     }
     tilesByTileset[tilesetIndex].push(tile);
   }
+
   const sceneryBands: SceneSceneryBand[] = [...bandTilesByRow.entries()]
     .map(([row, tilesByTileset]) => ({
       baseline: (row + 1) * VILLAGE_TILE,
@@ -250,33 +340,167 @@ const buildVillageLayout = (): Scene => {
     }))
     .sort((a, b) => a.baseline - b.baseline);
 
-  const placementGrid = new Uint8Array(VILLAGE_COLUMNS * VILLAGE_ROWS);
-  for (let i = 0; i < placementGrid.length; i++) {
-    placementGrid[i] = allowedGrid[i] === 1 && blockedGrid[i] === 0 ? 1 : 0;
+  /**
+   * Splits one group name's raw cells into 8-connected clusters (a cell
+   * belongs to a cluster if it's touching, including diagonally, another
+   * cell already in it) - each becomes an independent SceneryGroup. Pure
+   * geometry, no semantic guessing: tiles that don't touch are never one
+   * physical object no matter what the author named them, so this is a
+   * strict correctness fix, not a heuristic (contrast the ungrouped-tile
+   * auto-clustering idea rejected elsewhere - that one *would* have guessed).
+   */
+  const splitCellsIntoClusters = (cells: RawSceneryCell[]): RawSceneryCell[][] => {
+    const byPosition = new Map(cells.map((cell) => [`${cell.column},${cell.row}`, cell]));
+    const visited = new Set<string>();
+    const clusters: RawSceneryCell[][] = [];
+    for (const cell of cells) {
+      const key = `${cell.column},${cell.row}`;
+      if (visited.has(key)) {
+        continue;
+      }
+      const cluster: RawSceneryCell[] = [];
+      const stack = [cell];
+      visited.add(key);
+      while (stack.length > 0) {
+        const current = stack.pop()!;
+        cluster.push(current);
+        for (let dc = -1; dc <= 1; dc++) {
+          for (let dr = -1; dr <= 1; dr++) {
+            if (dc === 0 && dr === 0) continue;
+            const neighborKey = `${current.column + dc},${current.row + dr}`;
+            const neighbor = byPosition.get(neighborKey);
+            if (neighbor && !visited.has(neighborKey)) {
+              visited.add(neighborKey);
+              stack.push(neighbor);
+            }
+          }
+        }
+      }
+      clusters.push(cluster);
+    }
+    return clusters;
+  };
+
+  const sceneryGroups: SceneryGroup[] = [...rawCellsByGroupName.entries()]
+    .flatMap(([name, cells]) => {
+      const clusters = splitCellsIntoClusters(cells);
+      return clusters.map((cluster, clusterIndex) => {
+        const tilesByTileset: Tile[][] = VILLAGE_TILESETS.map(() => []);
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        for (const cell of cluster) {
+          tilesByTileset[cell.tilesetIndex].push(cell.tile);
+          const x = cell.column * VILLAGE_TILE;
+          const y = cell.row * VILLAGE_TILE;
+          minX = Math.min(minX, x);
+          minY = Math.min(minY, y);
+          maxX = Math.max(maxX, x + VILLAGE_TILE);
+          maxY = Math.max(maxY, y + VILLAGE_TILE);
+        }
+        return {
+          // A name used just once keeps it as-is (the common case, and the
+          // id an author sees in Tiled); a reused name gets a stable suffix
+          // per cluster so removal only ever affects the one physically
+          // touching piece a tap actually selected.
+          id: clusters.length > 1 ? `${name}#${clusterIndex + 1}` : name,
+          // Same convention as a band's baseline: the bottom of the group's
+          // lowest tile - maxY already *is* that (see the loop above).
+          baseline: maxY,
+          tilesByTileset,
+          bounds: { minX, minY, maxX, maxY },
+          cells: cluster.map(({ column, row, solid }) => ({ column, row, solid })),
+        };
+      });
+    })
+    .sort((a, b) => a.baseline - b.baseline);
+
+  for (let index = 0; index < cellCount; index++) {
+    recomputeCell(grids, index);
   }
+
+  // The first-ever value handed to each SharedValue - safe to pass the
+  // working array directly here (nothing has cached a clone of it yet).
+  // Every later change goes through `.value = <fresh copy>` instead - see
+  // removeSceneryGroup below and bounds.ts's TileCollision comment.
+  const gridShared = makeMutable(grids.grid);
+  const placementGridShared = makeMutable(grids.placementGrid);
+
+  const groupCellsById = new Map(
+    sceneryGroups.map((group) => [group.id, group.cells] as const),
+  );
+  const removedGroupIds = new Set<string>();
+
+  /**
+   * Clears a scenery group's collision and placement-blocking footprint, so
+   * the village's shared grids (built once, for the app's lifetime -
+   * `VILLAGE` is a module-level singleton, not rebuilt per scene mount)
+   * reflect a removed tree immediately for every consumer that reads them
+   * (the movement worklet, item placement), without rebuilding the scene.
+   * Idempotent - a second call for an already-removed or unknown id is a
+   * no-op.
+   *
+   * Updates the plain working arrays in place (cheap - a handful of cells),
+   * then pushes a *fresh copy* of each into its SharedValue in one go per
+   * grid, rather than one `.value` write per cell - seeing bounds.ts's
+   * TileCollision comment for why this has to go through `.value` at all,
+   * and a fresh copy (not the same mutated-in-place array) so there's no
+   * dependence on whether Reanimated treats a same-reference `.value` write
+   * as a no-op.
+   *
+   * Deliberately does *not* touch `sceneryGroups`/rendering - what still
+   * *draws* a removed group is a plain React-state concern the caller
+   * (HomeScreen.tsx) filters on, so this staying a reference-stable, purely
+   * imperative function doesn't fight React's memoization of the render
+   * side. Returns whether it actually removed something, so the caller can
+   * tell a stale/duplicate id from a real removal.
+   */
+  const removeSceneryGroup = (id: string): boolean => {
+    if (removedGroupIds.has(id)) {
+      return false;
+    }
+    const cells = groupCellsById.get(id);
+    if (!cells) {
+      return false;
+    }
+    removedGroupIds.add(id);
+    for (const cell of cells) {
+      const index = cell.row * VILLAGE_COLUMNS + cell.column;
+      if (cell.solid) {
+        grids.sceneryCollisionCount[index] -= 1;
+      }
+      grids.sceneryBlockCount[index] -= 1;
+      recomputeCell(grids, index);
+    }
+    gridShared.value = grids.grid.slice();
+    placementGridShared.value = grids.placementGrid.slice();
+    return true;
+  };
 
   const width = VILLAGE_COLUMNS * VILLAGE_TILE;
   const height = VILLAGE_ROWS * VILLAGE_TILE;
 
-  return {
+  const scene: Scene = {
     id: "village",
     tileSize: VILLAGE_TILE,
     preferredTilesVisibleTall: VILLAGE_TILES_VISIBLE_TALL,
     layers,
     sceneryBands,
+    sceneryGroups,
     // An ambient villager who potters about near the spawn/house - just off
     // the player's own spawn so they don't start stacked. See WanderingNpc.
     wanderingNpc: {
       spawn: { x: VILLAGE_SPAWN.x - 20, y: VILLAGE_SPAWN.y - 4 },
     },
     tileCollision: {
-      grid,
+      grid: gridShared,
       columns: VILLAGE_COLUMNS,
       rows: VILLAGE_ROWS,
       tileSize: VILLAGE_TILE,
     },
     placementMask: {
-      grid: placementGrid,
+      grid: placementGridShared,
       columns: VILLAGE_COLUMNS,
       rows: VILLAGE_ROWS,
       tileSize: VILLAGE_TILE,
@@ -335,7 +559,20 @@ const buildVillageLayout = (): Scene => {
       },
     ],
   };
+
+  return { scene, removeSceneryGroup };
 };
 
+const { scene: builtVillage, removeSceneryGroup } = buildVillageLayout();
+
 /** The village scene the app shows, built once from the imported map. */
-export const VILLAGE = buildVillageLayout();
+export const VILLAGE = builtVillage;
+
+/**
+ * Removes one removable scenery group (a tree tagged with a Tiled `group`
+ * property) from the village's collision/placement grids - see
+ * `buildVillageLayout`'s own comment on why this is separate from
+ * `VILLAGE.sceneryGroups`, which the render side filters on instead. Returns
+ * whether it actually removed something.
+ */
+export const removeVillageSceneryGroup = removeSceneryGroup;

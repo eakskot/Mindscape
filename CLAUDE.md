@@ -258,7 +258,7 @@ git** - path hardcoded as `SOURCE_TMX` in the importer). 120 x 80 tiles, 16px. L
 a `ground_* / deco_* / col_*` naming scheme (`ground_grass`, `ground_water_collision`,
 `ground_beach`, `ground_paths`, `ground_bridges`, `ground_fences_collision`,
 `deco_small_extras`, `col_house_collision`). Trees/rocks/bushes are **not** a layer - the
-importer emits them as `VILLAGE_SCENERY` (~1500 pieces). A tile object tagged with a
+importer emits them as `VILLAGE_SCENERY` (~1600 pieces). A tile object tagged with a
 custom `group` string property in Tiled (same value on every tile of one tree/rock) becomes
 a removable `SceneryGroup` instead of joining a row band - see "Current state" and
 `villageLayout.ts`. **A `group` name isn't trusted as globally unique** (confirmed reused
@@ -270,7 +270,13 @@ or are a **leftover untagged object sitting on the same cell** as a tagged one (
 real: a stray single-tile object with its own group name, at the same position as a tile
 already in a different tree's group - one silently painted over the other). Both need a
 Tiled-side fix (re-tag / delete the duplicate), not a code fix - flag it to Emil with exact
-cell coordinates if noticed rather than guessing which one is "correct".
+cell coordinates if noticed rather than guessing which one is "correct". **Known open
+instances** (as of the 1597-piece import, commit `c1b1c64`) - check whether still present
+before re-deriving: `tall_stone_04` still has a duplicate-position tile at cell `(68,40)`
+(gid 2747 & 2796, same as the already-fixed ones at (66,40)/(67,40)); `forest_02` overlaps
+`tall_stone_04`/`mid_stone_06` on 8 cells; three exact-duplicate *ungrouped* tiles sit near
+the new forest at `(66,35)` (gid 4390 x2), `(69,34)` and `(70,34)` (gid 3591 x2 each) -
+likely copy-paste leftovers.
 `topLayerName` is currently `undefined`: the old `top_layer_collision` held almost every
 tree, not the house roof - which is *why* items near trees always rendered behind. Give it
 a real value once the house's overhanging roof rows are split into their own layer.

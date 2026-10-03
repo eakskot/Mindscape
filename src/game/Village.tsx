@@ -1,4 +1,5 @@
 import { useImage } from "@shopify/react-native-skia";
+import { useMemo } from "react";
 
 /**
  * Loads the village's tileset images, in the same order as `VILLAGE_TILESETS`
@@ -30,5 +31,13 @@ export const useVillageImages = () => {
     require("../assets/tiles/ModernExteriors_Ground_Variants_16x16.png"),
   );
 
-  return [terrains, outsideStuff, houses, groundVariants];
+  // Memoized so the returned array is reference-stable once every image has
+  // decoded (useImage itself already caches each individual SkImage by
+  // source - this just stops a *new wrapping array* on every render from
+  // defeating SceneLayers.tsx's own `memo` on SceneLayerAtlas, which reads
+  // `images` as a whole prop).
+  return useMemo(
+    () => [terrains, outsideStuff, houses, groundVariants],
+    [terrains, outsideStuff, houses, groundVariants],
+  );
 };

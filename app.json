@@ -8,7 +8,8 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.Mindscape"
+      "bundleIdentifier": "com.emilskotner.mindscape",
+      "appleTeamId": "D6Z2L8HVV8"
     },
     "android": {
       "adaptiveIcon": {
@@ -21,6 +22,14 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      ["expo-build-properties", { "ios": { "deploymentTarget": "16.4" } }],
+      ["react-native-device-activity", {
+        "appleTeamId": "D6Z2L8HVV8",
+        "appGroup": "group.com.emilskotner.mindscape",
+        "copyToTargetFolder": false
+      }]
+    ]
   }
 }

@@ -5,6 +5,7 @@ import {
   useRectBuffer,
   type DataSourceParam,
 } from "@shopify/react-native-skia";
+import { memo } from "react";
 import type { SharedValue } from "react-native-reanimated";
 
 import { PIXEL_ART } from "./atlas";
@@ -17,8 +18,12 @@ import { toScreenPoint } from "./entitySprite";
  * pass a different one of these as `sheet` (see NPC_SHEET, HomeScreen.tsx).
  */
 export const PLAYER_SHEET: DataSourceParam = require("../assets/sprites/player/Premade_Character_03.png");
-/** A visibly different skin (grey hair, glasses) for the wandering NPC. */
+/** A visibly different skin (grey hair, glasses) for a wandering NPC. */
 export const NPC_SHEET: DataSourceParam = require("../assets/sprites/player/Premade_Character_20.png");
+/** A second ambient-villager skin (red cap, teal top) - see WanderingNpc.tsx. */
+export const NPC_SHEET_2: DataSourceParam = require("../assets/sprites/player/Premade_Character_04.png");
+/** A third ambient-villager skin (pink hair, dark outfit) - see WanderingNpc.tsx. */
+export const NPC_SHEET_3: DataSourceParam = require("../assets/sprites/player/Premade_Character_18.png");
 
 type CharacterProps = {
   /** Position of the character's feet, in room pixels. */
@@ -67,8 +72,23 @@ type CharacterProps = {
  * carry its own scale - the RSXform below does the camera placement itself
  * (via entitySprite.ts's toScreenPoint, shared with placed items) instead of
  * inheriting an ambient transform.
+ *
+ * Wrapped in `memo`: every prop here is either a SharedValue (stable
+ * reference for the life of the mount - all motion flows through `.value`,
+ * read inside the worklets below, never through a changed prop) or a plain
+ * constant (`density`, `sheet`), so this component never actually needs to
+ * re-render after mount - only to stay mounted so `useRectBuffer`/
+ * `useRSXformBuffer`'s own Reanimated mapper (registered fresh on every
+ * render - see CLAUDE.md's note on the Skia/Reanimated logger warning, same
+ * hook) doesn't get torn down and rebuilt for nothing. Without `memo`, any
+ * unrelated state change in `SceneStage` (HomeScreen.tsx) - most of all
+ * `moveItem` firing on every frame of an item drag - re-rendered every
+ * `Character`/`WanderingNpc` on screen too, fighting their own per-frame
+ * worklet-driven animation. That's the actual cause of movement turning
+ * janky after placing/dragging a few items, not a connection issue - see
+ * ItemLayer.tsx's matching `memo` on `ItemVisual`/`PlacedItemSprite`.
  */
-export const Character = ({
+export const Character = memo(function Character({
   x,
   y,
   column,
@@ -78,7 +98,7 @@ export const Character = ({
   entityScale,
   density,
   sheet = PLAYER_SHEET,
-}: CharacterProps) => {
+}: CharacterProps) {
   const image = useImage(sheet);
 
   const sprites = useRectBuffer(1, (rect) => {
@@ -107,4 +127,4 @@ export const Character = ({
       sampling={PIXEL_ART}
     />
   );
-};
+});

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PanResponder } from "react-native";
 
 import type { EditMode } from "../../game/items/editMode";
@@ -105,6 +105,31 @@ export const useSceneGestures = ({
   const pinch = useRef<{ startDist: number; startScale: number } | null>(null);
   // Set the moment a gesture becomes a pinch, so its release isn't a tap too.
   const gestureWasPinch = useRef(false);
+  // Coalesces an item drag's React updates (`moveItem`/`setDragValid`) to at
+  // most one per rendered frame, via requestAnimationFrame - touch-move
+  // events can arrive faster than the display refreshes, and each one was
+  // otherwise a separate `setItems` commit (a full React render+commit, not
+  // a cheap shared-value write - `moveItem` deliberately goes through real
+  // state, see useWorldItems.ts, since the dragged item's live position has
+  // to be visible to collision/placement checks and survive a scene's own
+  // re-renders the same way every other item does). `onPanResponderMove`
+  // itself still runs on every touch event and keeps `drag.current.lastX/Y`
+  // exactly current - only the React-visible commit is throttled, so a
+  // release (which reads `drag.current` directly, never the throttled
+  // state) always sees the true final position regardless of this.
+  const dragFrame = useRef<number | null>(null);
+  const cancelDragFrame = () => {
+    if (dragFrame.current !== null) {
+      cancelAnimationFrame(dragFrame.current);
+      dragFrame.current = null;
+    }
+  };
+  // A scene switch (SceneStage remounts, keyed by sceneId - see
+  // HomeScreen.tsx) can unmount this hook mid-drag, orphaning `worldRef`'s
+  // target. Nothing else here is async - every other callback runs
+  // synchronously inside the touch event that triggered it - so this is the
+  // one cleanup this file needs.
+  useEffect(() => cancelDragFrame, []);
 
   /** Which removable scenery group (if any) a room point lands inside. */
   const sceneryGroupAt = (roomX: number, roomY: number) =>
@@ -126,6 +151,11 @@ export const useSceneGestures = ({
         onPanResponderGrant: (event) => {
           pinch.current = null;
           gestureWasPinch.current = false;
+          // A stray queued frame from a previous drag must never commit
+          // against this new one's `drag.current` - see `dragFrame`'s own
+          // comment. In practice the frame's own instanceId guard (below)
+          // already protects against committing the wrong item either way.
+          cancelDragFrame();
 
           const { locationX, locationY } = event.nativeEvent;
           const { roomX, roomY } = toRoomPoint(locationX, locationY);
@@ -206,32 +236,42 @@ export const useSceneGestures = ({
           if (itemDrag) {
             const { locationX, locationY } = event.nativeEvent;
             const { roomX, roomY } = toRoomPoint(locationX, locationY);
+            // Always current, every touch event - the finger never lags.
             itemDrag.lastX = roomX - itemDrag.grabX;
             itemDrag.lastY = roomY - itemDrag.grabY;
-            // Free movement while dragging; snapped on release.
-            worldRef.current.moveItem(
-              itemDrag.instanceId,
-              itemDrag.lastX,
-              itemDrag.lastY,
-              false,
-            );
-            // Live yellow/red feedback - checked against where release would
-            // actually snap to, so the glow never lies about a drop now. Both
-            // the ground check and "would this land on another item" have to
-            // pass - overlapping items steal each other's touch priority.
-            setDragValid(
-              worldRef.current.isValidPlacement(
-                itemDrag.lastX,
-                itemDrag.lastY,
-                itemDrag.itemId,
-              ) &&
-                !worldRef.current.overlapsOtherItem(
-                  itemDrag.lastX,
-                  itemDrag.lastY,
-                  itemDrag.itemId,
-                  itemDrag.instanceId,
-                ),
-            );
+            // The React-visible commit (what actually repaints the item and
+            // its drag glow) is coalesced to one per frame - see
+            // `dragFrame`'s own comment. A touch event arriving while a
+            // frame is already queued just updates `itemDrag` above and
+            // leaves the queued frame to pick up the latest position when it
+            // runs; it doesn't queue a second one.
+            if (dragFrame.current === null) {
+              dragFrame.current = requestAnimationFrame(() => {
+                dragFrame.current = null;
+                // The drag may have ended (or moved to a different item) in
+                // the time this frame was queued - nothing to commit then.
+                const live = drag.current;
+                if (!live || live.instanceId !== itemDrag.instanceId) {
+                  return;
+                }
+                // Free movement while dragging; snapped on release.
+                worldRef.current.moveItem(live.instanceId, live.lastX, live.lastY, false);
+                // Live yellow/red feedback - checked against where release
+                // would actually snap to, so the glow never lies about a
+                // drop now. Both the ground check and "would this land on
+                // another item" have to pass - overlapping items steal each
+                // other's touch priority.
+                setDragValid(
+                  worldRef.current.isValidPlacement(live.lastX, live.lastY, live.itemId) &&
+                    !worldRef.current.overlapsOtherItem(
+                      live.lastX,
+                      live.lastY,
+                      live.itemId,
+                      live.instanceId,
+                    ),
+                );
+              });
+            }
             return;
           }
 
@@ -266,6 +306,13 @@ export const useSceneGestures = ({
 
           const itemDrag = drag.current;
           if (itemDrag) {
+            // The final commit below is the authoritative position - a
+            // throttled frame still queued from the last touch-move must
+            // not land after it and clobber this with a stale, unsnapped
+            // one (its own instanceId guard would also catch this once
+            // `drag.current` is null below, but cancelling here is cheaper
+            // than letting it run and bail).
+            cancelDragFrame();
             const valid =
               worldRef.current.isValidPlacement(
                 itemDrag.lastX,

@@ -131,12 +131,25 @@ export type Scene = {
    */
   sceneryGroups?: SceneryGroup[];
   /**
-   * An ambient character that only wanders - never walked by a tap, never
-   * triggers a portal (see WanderingNpc). The value is where it spawns and
-   * centres its roaming, in room pixels. Omitted = no NPC in this scene
-   * (the room); HomeScreen.tsx just doesn't mount one.
+   * Ambient characters that only wander - never walked by a tap, never
+   * trigger a portal (see WanderingNpc). Each entry is where it spawns and
+   * centres its roaming, in room pixels, plus which premade sheet draws it
+   * (see WANDERING_NPC_SHEETS in HomeScreen.tsx - kept as a scene-agnostic
+   * id here rather than a Skia DataSourceParam, the same reason scene.ts has
+   * no other Skia import). Omitted/empty = no NPC in this scene (the room);
+   * HomeScreen.tsx just doesn't mount any.
+   *
+   * All of them share the player's paint slot for occlusion (see
+   * HomeScreen.tsx's comment by WanderingNpc) - that approximation only
+   * holds while an NPC's wander patch stays reasonably close to wherever the
+   * player actually is, so don't spawn one far from where the player spends
+   * most of their time without revisiting that comment.
    */
-  wanderingNpc?: { spawn: { x: number; y: number } };
+  wanderingNpcs?: {
+    spawn: { x: number; y: number };
+    /** Which premade sheet draws this NPC. Defaults to the original grey-hair skin. */
+    skin?: "npc" | "npc2" | "npc3";
+  }[];
   /**
    * Omitted where a scene has no interior obstacles besides its own outer
    * wall - the room's `walkable` box already excludes that, same as before

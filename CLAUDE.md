@@ -20,9 +20,12 @@ ways. What's in:
 
 - **Movement**: tap-to-walk, idle wandering, collision against imported terrain + placed
   items, a progress watchdog. All on the UI thread (`useCharacter`).
-- **A second character**: an ambient **wandering villager** (`WanderingNpc`) in the
-  village - never tapped, never triggers portals, keeps to a small patch near its spawn.
-  Driven by `Scene.wanderingNpc` data (the room has none, so it mounts nothing there).
+- **Ambient villagers**: three **wandering villagers** (`WanderingNpc`) in the village,
+  each a different premade sheet (`NPC_SHEET`/`NPC_SHEET_2`/`NPC_SHEET_3`, see
+  Character.tsx) - never tapped, never trigger portals, each keeps to a small patch near
+  its own spawn. Driven by `Scene.wanderingNpcs` data (the room has none, so it mounts
+  none there); HomeScreen.tsx resolves each entry's `skin` id to the actual sheet via
+  `WANDERING_NPC_SHEETS` (scene.ts stays Skia-free, same reason `SCENES` exists there).
 - **Camera** (`useCamera`): follows the character; a pan or pinch is a **one-way handoff**
   (following stops for the scene's life). Seam-snapped to the device-pixel grid.
 - **Pinch-to-zoom**: the world/tile scale is a shared value a pinch drives *continuously*
@@ -87,6 +90,84 @@ un-picked when these land.
      a live counter.
    - iOS only, no Android equivalent. Since iOS 16.4-ish a user can self-authorize (not
      just a parent for a child), which is the case here (monitoring yourself).
+
+   **Status (started 2026-09-27):**
+   - Real bundle identifier set: `com.emilskotner.mindscape` (was the Expo placeholder
+     `com.anonymous.Mindscape`). Apple team ID `D6Z2L8HVV8` is in `app.json`
+     (`ios.appleTeamId` and the plugin config).
+   - `react-native-device-activity` + `expo-build-properties` installed;
+     `app.json`'s `plugins` has both, `deploymentTarget` bumped to `16.4` (the
+     `expo-build-properties` plugin itself refuses anything lower - individual,
+     self-monitoring authorization needs it).
+   - `targets/` (ActivityMonitorExtension, ShieldAction, ShieldConfiguration - the
+     Screen Time app extensions, `@kingstinct/expo-apple-targets`' convention) is
+     scaffolded and committed. **One deliberate deviation from upstream:** the
+     plugin's `withCopyTargetFolder` step copies a `Shared.swift` into each target
+     folder; on this machine's Claude-Cowork device bridge that exact path was
+     reliably blocked (permission-denied at the bridge level, unrelated to real
+     filesystem permissions - some other path collided with an internal reserved
+     pattern). Worked around by renaming it to `DeviceActivityShared.swift`
+     (functionally identical - Swift doesn't care about filenames within a target)
+     and disabling the plugin's own copy step (`"copyToTargetFolder": false` in
+     `app.json`, since `targets/` is now hand-scaffolded and shouldn't be
+     overwritten). The rename is patched into `node_modules` via `patch-package`
+     (`patches/react-native-device-activity+0.6.1.patch`, runs on every `npm
+     install` via the `postinstall` script) so it survives a fresh install. If
+     this doesn't apply cleanly against a future version bump, that's why -
+     re-diff against the new version's `config-plugin/withCopyTargetFolder.js`.
+   - `src/game/screentime/` has `useScreenTime.ts` (authorization, monitoring
+     schedule/threshold, wires `eventDidReachThreshold` /`intervalDidEnd` to
+     `useWallet`'s `accrue`), `BrainrotAppPicker.tsx` (the persisted app/category
+     picker), and `DevScreenTime.tsx` (a DevInventory-style throwaway panel -
+     request access, pick apps, start/stop watching - wired into
+     `HomeScreen.tsx` the same way `DevInventory` is, via a new `onAccrue` prop
+     drilled into `SceneStage`). `npx tsc --noEmit` passes clean.
+   - **Not done yet:**
+     - The Family Controls entitlement request itself was submitted 2026-09-27 -
+       but correcting an earlier note here: the actual request form
+       (developer.apple.com/contact/request/family-controls-distribution) has no
+       bundle-ID field at all. It's a single, **team-level** request (name/email/
+       Team ID only), not one per bundle ID as first assumed. Recent Apple-forum
+       reports say this queue runs weeks with no status updates - nothing to do
+       but wait on it.
+     - Once Apple approves it, the capability still needs to be turned on **per
+       App ID**: Certificates, Identifiers & Profiles -> Identifiers -> (each of
+       the 4 App IDs) -> Capabilities tab -> enable "Family Controls" -> Save.
+       Self-service, no extra Apple review. The 4 App IDs
+       (`com.emilskotner.mindscape` and the three `.ActivityMonitorExtension` /
+       `.ShieldAction` / `.ShieldConfiguration` suffixes) don't exist yet in
+       Certificates, Identifiers & Profiles - registering them doesn't need to
+       wait for approval, can be done any time.
+     - `expo prebuild --platform ios` hasn't been run to completion. It needs to
+       run on the actual Mac, not through this bridge - the bridge's Linux VM has
+       no Xcode/CocoaPods anyway (`pod install` was never going to work from
+       there), and independently, Node's own `fs` calls (mkdir/cp) hit the same
+       bridge flakiness repeatedly deep in prebuild while shell equivalents didn't.
+       Run `rm -rf ios && npx expo prebuild --platform ios` locally, then
+       `cd ios && pod install`.
+     - Nothing here has been run on a simulator or device yet - the whole
+       useScreenTime/BrainrotAppPicker/DevScreenTime flow is untested beyond
+       type-checking cleanly. Expect to debug on first real build.
+   - **Developing/testing this does not have to wait for Apple's approval.**
+     That's only needed for App Store/TestFlight distribution. Locally:
+     - **Simulator won't work at all** - FamilyControls/DeviceActivity need a
+       real, physical iPhone signed into iCloud (Simulator has no Screen Time
+       data and the authorization/picker flow doesn't function there).
+     - A **development-signed** build from Xcode (or `expo run:ios --device`)
+       gets the Family Controls capability automatically once it's added to the
+       targets' entitlements - Xcode provisions this itself for local runs, no
+       Apple-side approval needed for that. This is what "development only
+       works via Xcode builds" (noted above, from the library's README) means.
+     - Practical iteration tip: `DAILY_BUDGET_MINUTES` in `useScreenTime.ts` is
+       30 - drop it to 1-2 while testing so `eventDidReachThreshold` actually
+       fires within a test session instead of requiring half an hour of real
+       phone use per iteration. Revert before shipping.
+     - So the real next milestone is: register the 4 App IDs, run
+       prebuild + pod install, plug in a real iPhone, build via Xcode with
+       development signing, and exercise the whole authorize -> pick apps ->
+       start monitoring -> use a shielded app -> see the event fire loop on
+       device. The Apple approval queue runs in parallel, only gating the
+       eventual TestFlight build.
 4. **Navigation.** A shop screen, a Screen-Time settings/permission screen and the world
    view can't all be `HomeScreen`. When a second screen is real, add a navigator
    (`expo-router` fits the Expo setup; `@react-navigation/native` is the alternative) -
@@ -98,6 +179,21 @@ Versions are in `package.json` (Expo SDK 57, RN 0.86, Reanimated 4, Skia 2.6). D
 **no gesture-handler** (PanResponder everywhere), **no state library**, **no navigator**,
 **no test runner** - don't add one without deciding to migrate. `/ios` and `/android` are
 generated by `expo prebuild` and gitignored.
+
+**`[Reanimated] Reading from \`value\` during component render` in the log is a known
+cross-library false positive, not an app bug** - audited every `.value` read in this repo
+(there is no other kind of code search worth re-doing here) and every one is already inside
+a worklet/`useDerivedValue`/`useEffect`/event handler. The real source is
+`@shopify/react-native-skia`'s own `useRectBuffer`/`useRSXformBuffer` (used by every
+animated item sprite - `ItemLayer.tsx`'s `AnimatedSprite` - and every animated scenery tile
+- `atlas.ts`'s `useAnimatedAtlasData`, water waves): its `buffers.js` calls Reanimated's
+low-level `startMapper` straight in the hook body (not inside a `useEffect`), which
+Reanimated's strict-mode patch can't tell apart from a real violation - the same class of
+report filed against other libraries after Reanimated 3.16 added this logger (e.g.
+gorhom/react-native-bottom-sheet#1983). Fixed by turning the *strict* class of check off
+(not the logger entirely) in `index.ts`'s `configureReanimatedLogger` call - re-derive this
+from scratch only if a genuinely new instance shows up somewhere this reasoning doesn't
+cover.
 
 ## Running it
 
@@ -129,11 +225,11 @@ so tsc + a screenshot is the whole safety net.
 
 | File | Responsibility |
 |---|---|
-| `scene.ts` | The `Scene` / `Tile` / `Portal` / `SceneSceneryBand` / `SceneryGroup` shapes both scenes produce - **read this first**. Optional fields (`sceneryBands`, `sceneryGroups`, `wanderingNpc`, `tileCollision`, `placementMask`, `topLayerName`) let a scene opt in to a feature; a scene without one costs nothing. |
+| `scene.ts` | The `Scene` / `Tile` / `Portal` / `SceneSceneryBand` / `SceneryGroup` shapes both scenes produce - **read this first**. Optional fields (`sceneryBands`, `sceneryGroups`, `wanderingNpcs`, `tileCollision`, `placementMask`, `topLayerName`) let a scene opt in to a feature; a scene without one costs nothing. |
 | `useCamera.ts` | The camera as a unit: `worldScale` + split `cameraX/cameraY` shared values, `transform`, `entityProps`, the follow frame-loop, and stable methods (`toRoomPoint`, `panBy`, `zoomAbout`, `settleZoom`). Its header lists the rules that must not be reverted. Owns `ENTITY_SCALE_MULTIPLIER` and `MIN/MAX_WORLD_SCALE`. |
 | `useCharacter.ts` | Movement, collision, animation on the UI thread. `frozen` holds it still (edit mode); `wanderArea` pens the idle wander to a box (NPCs). Returns `walkTo` and `controlled` (true only for a tap, so portals ignore idle wandering). |
-| `WanderingNpc.tsx` | An ambient character: a `useCharacter` whose `walkTo` is never called, no portal watcher, a different sheet. A component (not a bare hook call) so its `useFrameCallback` stays out of `SceneStage`. |
-| `Character.tsx` | Draws one 16x32 frame via `<Atlas>`. `sheet` prop picks the skin (`PLAYER_SHEET` / `NPC_SHEET`). |
+| `WanderingNpc.tsx` | An ambient character: a `useCharacter` whose `walkTo` is never called, no portal watcher, a `sheet` prop picks its skin. A component (not a bare hook call) so its `useFrameCallback` stays out of `SceneStage`. One is mounted per `Scene.wanderingNpcs` entry. |
+| `Character.tsx` | Draws one 16x32 frame via `<Atlas>`. `sheet` prop picks the skin (`PLAYER_SHEET` / `NPC_SHEET` / `NPC_SHEET_2` / `NPC_SHEET_3`). |
 | `characterSheet.ts` | Sprite-sheet geometry + animation clips (measured, don't re-derive). |
 | `entitySprite.ts` | `toScreenPoint` (camera + scale -> screen px, device-pixel-snapped) + the `EntityProps` type. Shared by the character and every item. |
 | `DepthSortedLayer.tsx` | The behind/front opacity toggle for the merged scenery+item list - draws each entity twice, UI thread picks which copy is visible against the character's Y. No re-sort in React per frame. |
@@ -247,8 +343,10 @@ tall**, grid 56 x 20. Feet touch the bottom edge -> anchor bottom-centre. One ro
 animation; four-directional rows hold four blocks in the order **right, up, left, down**.
 Rows: 1 idle(6) · 2 walk(6) · 3 sleep · 4-5 sit · 6 phone · 7 book · 8 push cart · 9 pick
 up · 10 gift · 11 lift · 12 throw · 13 hit · 14 punch · 15 stab · 16 grab gun · 17 gun
-idle · 18 shoot · 19 hurt. **No run animation** - walk at higher fps. `03` is the player,
-`20` is the NPC (grey hair, glasses).
+idle · 18 shoot · 19 hurt. **No run animation** - walk at higher fps. `03` is the player;
+`20`/`04`/`18` are the three village NPCs (grey hair+glasses / red cap+teal top / pink
+hair+dark outfit respectively - picked for visual contrast against each other and the
+player, see `Character.tsx`'s `NPC_SHEET`/`NPC_SHEET_2`/`NPC_SHEET_3`).
 
 **Room_Builder tilesets:** styles are 3x2 tile blocks. Floors repeat (`col % 3`, `row %
 2`). Walls are a horizontal 3-slice, two tiles tall. See generated `docs/tile-styles-*.png`.
@@ -277,6 +375,30 @@ before re-deriving: `tall_stone_04` still has a duplicate-position tile at cell 
 `tall_stone_04`/`mid_stone_06` on 8 cells; three exact-duplicate *ungrouped* tiles sit near
 the new forest at `(66,35)` (gid 4390 x2), `(69,34)` and `(70,34)` (gid 3591 x2 each) -
 likely copy-paste leftovers.
+
+**Bridges** (`ground_bridges`) are a plain draw layer, not a `*_collision` one - the
+character walks on whatever's underneath unless something says otherwise. The map was
+painted with `ground_water_collision` running unbroken under the river, bridges included, so
+every bridge was unwalkable: 143 of 161 bridge cells had a water-collision tile directly
+beneath them. **First fix attempt was a Tiled-side data edit** (clearing those 143 cells in
+`ground_water_collision`, on the assumption a bridge tile fully covers its cell so nothing
+would be lost visually) - **wrong**: at least one bridge tile doesn't fully cover its cell,
+so the cleared water left a visible black gap instead. Reverted that edit (water data is
+back to the original map). **Fixed properly in code instead**: `villageLayout.ts`'s
+`BRIDGE_LAYER_NAME` override - after every layer's built, any cell with a `ground_bridges`
+tile has its tile-layer collision forced off, regardless of what `ground_water_collision` (or
+any other `*_collision` layer) says underneath. Every layer still draws exactly what's in the
+map - nothing about `map.tmx` needs to change for a new bridge, this is the general rule now.
+Deliberately doesn't touch scenery-driven blocking (`sceneryCollisionCount`) - a fence or rock
+placed *on* a bridge still blocks it, same as it would anywhere else; two such cases exist on
+the live map, left as-is on purpose (Emil's call, not re-litigate without asking again): a
+`fence_01`-tagged railing (6 tiles, source cells (45,55)-(50,55)) sits across the spawn-side
+bridge's own entrance - since it's `group`-tagged it's already a normal removable
+`SceneryGroup` in-game (tap, pay, gone), so that bridge opens via the existing currency sink
+rather than by default; and a solid 2x3 ungrouped scenery block (cells (45,68)-(46,70), a
+rock/bush) still blocks a second, more
+southern bridge outright - nobody's touched it, that bridge stays closed until someone
+decides what should happen to that piece in Tiled.
 `topLayerName` is currently `undefined`: the old `top_layer_collision` held almost every
 tree, not the house roof - which is *why* items near trees always rendered behind. Give it
 a real value once the house's overhanging roof rows are split into their own layer.
@@ -342,6 +464,29 @@ pack lives at `~/SERENE_VILLAGE_REVAMPED/maps/ModernExteriors_Ground_Variants_16
     interrupting its own delta-time tracking. A test that repeatedly polls movement this
     way will show the character "stuck" even when nothing is actually wrong. Sample **once**
     after a fixed delay instead of on an interval, or the test result is not trustworthy.
+17. **Every on-canvas component that owns a `useRectBuffer`/`useRSXformBuffer` (Character,
+    WanderingNpc, ItemVisual/PlacedItemSprite, SceneLayerAtlas) must be wrapped in `memo`,
+    or movement turns janky the moment anything else re-renders `SceneStage`.** Root cause:
+    `@shopify/react-native-skia`'s `useRectBuffer`/`useRSXformBuffer` call Reanimated's
+    low-level `startMapper` straight in the hook body (not inside a `useEffect`) - so every
+    *unmemoized* render of a component using them tears down and rebuilds a real
+    UI-thread mapper, not just a cheap re-render. `moveItem` firing every frame of an item
+    drag (`itemEntities` rebuilding - by design, see Design decisions below) re-renders
+    `SceneStage`, and without `memo` that re-rendered *every* Character/WanderingNpc/item/
+    tile-layer on screen too, each paying that teardown/rebuild for nothing - the actual
+    cause of "placing/moving a few items makes the character janky to move, almost stuck,
+    until the app is reopened." Every prop on these components is either a SharedValue
+    (stable reference - all motion flows through `.value`, read inside their own worklets,
+    never through a changed prop) or otherwise reference-stable (see each component's own
+    comment) - `memo`'s default shallow comparison is exactly the right/safe tool, not a
+    hack. Two supporting fixes had to come with it, or `memo` doesn't actually bite:
+    `useVillageImages`/`useRoomImages` were returning a **new array literal every render**
+    (the individual `SkImage`s were stable, the wrapping array wasn't) - wrapped in
+    `useMemo`; HomeScreen.tsx's `belowLayers`/`aboveLayer` got the same treatment pre-
+    emptively (currently a no-op since neither scene sets `topLayerName` yet, but would've
+    silently defeated this the moment one does). This is also why the Reanimated
+    "strict mode" logger note above fires at all - same hook, same root cause, two
+    different symptoms (a log warning vs. real jank) from one upstream pattern.
 
 ## Rules we follow
 

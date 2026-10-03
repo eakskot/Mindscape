@@ -1,5 +1,6 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import type { SharedValue } from "react-native-reanimated";
+import type { DataSourceParam } from "@shopify/react-native-skia";
 
 import type { Bounds, TileCollision } from "./bounds";
 import { Character, NPC_SHEET } from "./Character";
@@ -27,6 +28,8 @@ type WanderingNpcProps = {
   worldScale: SharedValue<number>;
   entityScale: SharedValue<number>;
   density: number;
+  /** Which premade sheet draws this NPC. Defaults to NPC_SHEET (grey hair, glasses). */
+  sheet?: DataSourceParam;
 };
 
 /**
@@ -34,23 +37,37 @@ type WanderingNpcProps = {
  * same movement engine as the player, but nothing calls its `walkTo` and no
  * portal watcher reads it - so a tap on the ground only ever moves the
  * player, and this one drifting into a door does nothing. Different skin
- * (NPC_SHEET). It respects the scene's terrain and item collision; it and
- * the player pass through each other (neither is in the other's obstacle
- * list) - cheaper than feeding each other's live position in as an obstacle,
- * and overlapping cozy-game characters read fine.
+ * from the player, and from any other WanderingNpc drawn alongside it - the
+ * `sheet` prop picks which premade character sheet (see NPC_SHEET/
+ * NPC_SHEET_2/NPC_SHEET_3 in Character.tsx and Scene.wanderingNpcs' `skin`).
+ * It respects the scene's terrain and item collision; it and the player pass
+ * through each other (neither is in the other's obstacle list) - cheaper
+ * than feeding each other's live position in as an obstacle, and overlapping
+ * cozy-game characters read fine. Two WanderingNpcs pass through each other
+ * for the same reason.
  *
  * A whole component rather than a bare `useCharacter` call in HomeScreen so
  * that (a) all of its hooks - including a `useFrameCallback` - stay out of
- * SceneStage's already long hook list, and (b) a scene without a
- * `wanderingNpc` (the room) simply doesn't mount it and pays nothing.
+ * SceneStage's already long hook list, and (b) a scene without any
+ * `wanderingNpcs` (the room) simply doesn't mount one and pays nothing.
  *
  * Penned to a small patch around `spawn` (`wanderArea`), not the whole
  * scene: an NPC that picked targets across the entire village spent its time
  * grinding along a far-off shoreline the camera never shows - it read as a
  * glitch. Kept near its spawn it also stays near the player, which is what
  * keeps its shared-paint-slot occlusion (see HomeScreen.tsx) looking right.
+ *
+ * Wrapped in `memo` for the same reason Character.tsx is: every prop here
+ * (spawn/walkable/tileSize come straight from the stable `scene` singleton;
+ * obstacles/frozen/camera/worldScale/entityScale are SharedValues; sheet is
+ * one of the fixed NPC_SHEET* constants) is reference-stable across a
+ * SceneStage re-render, so without `memo` every one of these - all three of
+ * them today - tears down and rebuilds its own `<Character>`'s Reanimated
+ * mapper on every unrelated re-render (most of all `moveItem` firing per
+ * frame of an item drag), fighting its own idle-wander animation. See
+ * Character.tsx's own comment and CLAUDE.md.
  */
-export const WanderingNpc = ({
+export const WanderingNpc = memo(function WanderingNpc({
   spawn,
   obstacles,
   walkable,
@@ -61,7 +78,8 @@ export const WanderingNpc = ({
   worldScale,
   entityScale,
   density,
-}: WanderingNpcProps) => {
+  sheet = NPC_SHEET,
+}: WanderingNpcProps) {
   const wanderArea = useMemo<Bounds>(() => {
     const radius = WANDER_RADIUS_TILES * tileSize;
     return {
@@ -87,11 +105,11 @@ export const WanderingNpc = ({
       y={y}
       column={column}
       row={row}
-      sheet={NPC_SHEET}
+      sheet={sheet}
       camera={camera}
       worldScale={worldScale}
       entityScale={entityScale}
       density={density}
     />
   );
-};
+});

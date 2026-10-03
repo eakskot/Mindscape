@@ -1,5 +1,5 @@
 import { Atlas, useImage } from "@shopify/react-native-skia";
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import type { SharedValue } from "react-native-reanimated";
 
 import { PIXEL_ART, useAnimatedAtlasData, useAtlasData, useFlippedImage } from "./atlas";
@@ -26,8 +26,19 @@ import type { SceneLayer, Tile } from "./scene";
  *
  * These compose (an animated tile can also be mirrored), so tiles split
  * into up to four groups, each still just one batched `<Atlas>` draw call.
+ *
+ * Wrapped in `memo`: `tiles`/`tileSize` only ever change on a scene remount
+ * (tile layers are static scene data), `clock` is a SharedValue (stable
+ * reference), and `image` is stable once decoded (see useVillageImages'/
+ * useRoomImages' own `memo` note on the array that carries it here) - so
+ * none of this component's props actually change across a `SceneStage`
+ * re-render. Without `memo`, any unrelated state change there (most of all
+ * `moveItem` firing every frame of an item drag) re-ran every tile layer's
+ * `useRectBuffer`-backed animated-tile buffer (water waves) for nothing, on
+ * top of the same problem on the character/item side - see Character.tsx's
+ * and ItemLayer.tsx's matching comments and CLAUDE.md.
  */
-const SceneLayerAtlas = ({
+const SceneLayerAtlas = memo(function SceneLayerAtlas({
   image,
   tiles,
   tileSize,
@@ -37,7 +48,7 @@ const SceneLayerAtlas = ({
   tiles: Tile[];
   tileSize: number;
   clock: SharedValue<number>;
-}) => {
+}) {
   const { plain, mirrored, animatedPlain, animatedMirrored } = useMemo(() => {
     const plain: Tile[] = [];
     const mirrored: Tile[] = [];
@@ -109,7 +120,7 @@ const SceneLayerAtlas = ({
       )}
     </>
   );
-};
+});
 
 /**
  * A tile group that never animates - drawn once from static source rects,

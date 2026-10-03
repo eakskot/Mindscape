@@ -218,9 +218,28 @@ const recomputeCell = (grids: VillageGrids, index: number) => {
     grids.allowedGrid[index] === 1 && blocked === 0 ? 1 : 0;
 };
 
+/**
+ * The one layer name that always wins over a `*_collision` layer underneath
+ * it. `ground_bridges` is a plain draw layer (its own tiles never set
+ * `layerCollision`), but the river it crosses is painted continuously on
+ * `ground_water_collision` *under* every bridge too (the map author never
+ * punched a hole there - editing that out in Tiled turned out to be the
+ * wrong fix: some bridge tiles don't fully cover their cell, so deleting the
+ * water tile under them left a visible gap instead of walkable bridge - see
+ * CLAUDE.md's Village map notes). Handled here instead, as a final override
+ * pass below: any cell with a bridge tile is forced walkable regardless of
+ * what a tile-layer collision says, while every layer still draws exactly
+ * what's in the map. Deliberately does not touch scenery-driven blocking
+ * (`sceneryCollisionCount`) - a fence or rock placed *on* a bridge (both
+ * exist on the live map, left as-is on purpose - see CLAUDE.md) still blocks
+ * it, the same as it would anywhere else.
+ */
+const BRIDGE_LAYER_NAME = "ground_bridges";
+
 const buildVillageLayout = () => {
   const layers: SceneLayer[] = [];
   const cellCount = VILLAGE_COLUMNS * VILLAGE_ROWS;
+  const bridgeGrid = new Uint8Array(cellCount);
   const grids: VillageGrids = {
     grid: new Uint8Array(cellCount),
     // Two contributions combined by recomputeCell (see PLACEMENT_LAYER_NAMES's
@@ -258,10 +277,21 @@ const buildVillageLayout = () => {
         } else {
           grids.layerBlocked[index] = 1;
         }
+        if (layer.name === BRIDGE_LAYER_NAME) {
+          bridgeGrid[index] = 1;
+        }
       }
     }
 
     layers.push({ name: layer.name, tilesByTileset });
+  }
+
+  // See BRIDGE_LAYER_NAME's own comment: a bridge tile always overrides a
+  // tile-layer collision underneath it, regardless of layer order above.
+  for (let index = 0; index < cellCount; index++) {
+    if (bridgeGrid[index] === 1) {
+      grids.layerCollision[index] = 0;
+    }
   }
 
   // Free-standing scenery (trees, rocks, bushes): each piece blocks the
@@ -488,11 +518,22 @@ const buildVillageLayout = () => {
     layers,
     sceneryBands,
     sceneryGroups,
-    // An ambient villager who potters about near the spawn/house - just off
-    // the player's own spawn so they don't start stacked. See WanderingNpc.
-    wanderingNpc: {
-      spawn: { x: VILLAGE_SPAWN.x - 20, y: VILLAGE_SPAWN.y - 4 },
-    },
+    // Three ambient villagers who potter about the yard - see WanderingNpc
+    // and Scene.wanderingNpcs' own comment on the shared-paint-slot caveat.
+    // Spawns checked against the source map's own collision/scenery data
+    // (grass, no layer collision, no free-standing scenery object sitting on
+    // the exact cell) before picking them - see "Verify before writing
+    // code" in CLAUDE.md:
+    //  - the original: just off the player's own spawn so they don't start
+    //    stacked.
+    //  - two more, a bit further out on either side of the house (source
+    //    tiles (62,52) and (52,54)), each a different premade sheet so the
+    //    three read as distinct villagers rather than triplets.
+    wanderingNpcs: [
+      { spawn: { x: VILLAGE_SPAWN.x - 20, y: VILLAGE_SPAWN.y - 4 }, skin: "npc" },
+      { spawn: { x: 1000, y: 840 }, skin: "npc2" },
+      { spawn: { x: 840, y: 872 }, skin: "npc3" },
+    ],
     tileCollision: {
       grid: gridShared,
       columns: VILLAGE_COLUMNS,

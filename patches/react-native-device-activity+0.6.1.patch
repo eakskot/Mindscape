@@ -1,0 +1,13 @@
+diff --git a/node_modules/react-native-device-activity/config-plugin/withCopyTargetFolder.js b/node_modules/react-native-device-activity/config-plugin/withCopyTargetFolder.js
+index 372d3ff..121d302 100644
+--- a/node_modules/react-native-device-activity/config-plugin/withCopyTargetFolder.js
++++ b/node_modules/react-native-device-activity/config-plugin/withCopyTargetFolder.js
+@@ -30,7 +30,7 @@ const withCopyTargetFolder = (config, { copyToTargetFolder = true }) => {
+     const targetPath = projectTargetFolderPath + "/" + nativeTarget;
+     // check if is directory
+     if (fs.lstatSync(targetPath).isDirectory()) {
+-      fs.cpSync(sharedFilePath, targetPath + "/Shared.swift");
++      fs.cpSync(sharedFilePath, targetPath + "/DeviceActivityShared.swift");
+     }
+   }
+ 

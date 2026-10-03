@@ -1,13 +1,20 @@
-import { Canvas, Group, useClock, type SkImage } from "@shopify/react-native-skia";
+import {
+  Canvas,
+  Group,
+  useClock,
+  type DataSourceParam,
+  type SkImage,
+} from "@shopify/react-native-skia";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { StyleSheet, View, useWindowDimensions } from "react-native";
 import { useSharedValue } from "react-native-reanimated";
 
-import { Character } from "../../game/Character";
+import { Character, NPC_SHEET, NPC_SHEET_2, NPC_SHEET_3 } from "../../game/Character";
 import { type DepthEntity, DepthSortedLayer } from "../../game/DepthSortedLayer";
 import { CurrencyHud } from "../../game/economy/CurrencyHud";
 import { useWallet } from "../../game/economy/useWallet";
 import { DevInventory } from "../../game/items/DevInventory";
+import { DevScreenTime } from "../../game/screentime/DevScreenTime";
 import { DragHighlight } from "../../game/items/DragHighlight";
 import type { EditMode } from "../../game/items/editMode";
 import { ItemLayer, ItemVisual } from "../../game/items/ItemLayer";
@@ -36,6 +43,17 @@ import { useSceneGestures } from "./useSceneGestures";
  * others once there's a reason to (a rare stone vs. a common bush).
  */
 const SCENERY_REMOVAL_COST = 10;
+
+/**
+ * Resolves a scene's scene-agnostic `wanderingNpcs[].skin` id (see scene.ts)
+ * to the actual Skia sheet - keeps scene.ts free of any Skia import, the
+ * same reason `SCENES` below exists for tile images.
+ */
+const WANDERING_NPC_SHEETS: Record<"npc" | "npc2" | "npc3", DataSourceParam> = {
+  npc: NPC_SHEET,
+  npc2: NPC_SHEET_2,
+  npc3: NPC_SHEET_3,
+};
 
 /**
  * Which images to load for each scene's tiles. The scene *data* lives with
@@ -119,6 +137,7 @@ export default function HomeScreen() {
         walletBalance={wallet.balance}
         removedSceneryIds={removedSceneryIds}
         onRemoveScenery={tryRemoveScenery}
+        onAccrue={wallet.accrue}
       />
       <CurrencyHud balance={wallet.balance} />
     </View>
@@ -132,6 +151,7 @@ function SceneStage({
   walletBalance,
   removedSceneryIds,
   onRemoveScenery,
+  onAccrue,
 }: {
   sceneId: SceneId;
   spawn: { x: number; y: number };
@@ -140,6 +160,8 @@ function SceneStage({
   removedSceneryIds: Set<string>;
   /** Spends the currency and removes the group; false if the spend failed. */
   onRemoveScenery: (id: string) => boolean;
+  /** wallet.accrue, drilled down the same way onRemoveScenery (wallet.spend) is - see useWallet.ts and DevScreenTime.tsx. */
+  onAccrue: (amount: number, source: string) => void;
 }) {
   const { width, height } = useWindowDimensions();
   const { scene, useImages } = SCENES[sceneId];
@@ -225,12 +247,26 @@ function SceneStage({
   const clock = useClock();
   // The village's roof draws in a second pass, above the character and items,
   // instead of the single below-everything pass - see Scene.topLayerName.
-  const belowLayers = scene.topLayerName
-    ? scene.layers.filter((layer) => layer.name !== scene.topLayerName)
-    : scene.layers;
-  const aboveLayer = scene.topLayerName
-    ? scene.layers.find((layer) => layer.name === scene.topLayerName)
-    : undefined;
+  // Memoized (not just `scene.layers` itself when topLayerName is unset, as
+  // it is for both scenes today) so that once a scene actually sets it,
+  // `belowLayers` doesn't start handing SceneLayers.tsx's `memo`'d
+  // SceneLayerAtlas a freshly-filtered array (new reference, same tiles)
+  // every render - see that file's own comment on why a stable `images`
+  // array mattered for the exact same reason.
+  const belowLayers = useMemo(
+    () =>
+      scene.topLayerName
+        ? scene.layers.filter((layer) => layer.name !== scene.topLayerName)
+        : scene.layers,
+    [scene.layers, scene.topLayerName],
+  );
+  const aboveLayer = useMemo(
+    () =>
+      scene.topLayerName
+        ? scene.layers.find((layer) => layer.name === scene.topLayerName)
+        : undefined,
+    [scene.layers, scene.topLayerName],
+  );
 
   // Placed `object` items and free-standing scenery (trees, rocks, bushes)
   // merged into one baseline-sorted list, so DepthSortedLayer's behind/front
@@ -351,18 +387,22 @@ function SceneStage({
         />
         <DepthSortedLayer entities={depthEntities} pass="behind" characterY={y} />
         {/*
-          The ambient NPC (scenes that have one - see Scene.wanderingNpc)
-          shares the player's paint slot: it's occluded by the same scenery
-          and items the player is, not Y-sorting independently. It keeps to a
-          small patch near its spawn so its baseline stays close to the
-          player's and that approximation holds; a full unified sort of every
-          character is a later job (and a prerequisite for a shopkeeper NPC
-          that stands somewhere specific). Drawn before the player so the
-          player wins on overlap.
+          The ambient NPCs (scenes that have any - see Scene.wanderingNpcs)
+          share the player's paint slot: each is occluded by the same
+          scenery and items the player is, not Y-sorting independently. Every
+          one keeps to a small patch near its own spawn so its baseline stays
+          close to the player's and that approximation holds; a full unified
+          sort of every character is a later job (and a prerequisite for a
+          shopkeeper NPC that stands somewhere specific). Drawn before the
+          player so the player wins on overlap.
         */}
-        {scene.wanderingNpc && (
+        {scene.wanderingNpcs?.map((npc, index) => (
           <WanderingNpc
-            spawn={scene.wanderingNpc.spawn}
+            // Spawn is fixed per scene mount, so its index is a stable key -
+            // same spirit as any other data-driven list here.
+            key={index}
+            spawn={npc.spawn}
+            sheet={npc.skin ? WANDERING_NPC_SHEETS[npc.skin] : undefined}
             obstacles={world.obstacles}
             walkable={scene.walkable}
             tileCollision={scene.tileCollision}
@@ -370,7 +410,7 @@ function SceneStage({
             tileSize={scene.tileSize}
             {...camera.entityProps}
           />
-        )}
+        ))}
         <Character x={x} y={y} column={column} row={row} {...camera.entityProps} />
         <DepthSortedLayer entities={depthEntities} pass="front" characterY={y} />
         <ItemLayer
@@ -431,6 +471,13 @@ function SceneStage({
         onSetEditMode={setEditMode}
         placedCount={world.items.length}
       />
+      {/*
+        Wallet is owned in HomeScreen (see the `wallet` comment above), not
+        SceneStage, so this needs its own prop drilled down the same way
+        walletBalance is - accrue itself, not the balance, since this is the
+        one place currency gets *earned* rather than spent.
+      */}
+      <DevScreenTime accrue={onAccrue} />
     </View>
   );
 }

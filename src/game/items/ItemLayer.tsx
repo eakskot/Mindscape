@@ -7,6 +7,7 @@ import {
   useRectBuffer,
   type SkImage,
 } from "@shopify/react-native-skia";
+import { memo } from "react";
 import { useDerivedValue, type SharedValue } from "react-native-reanimated";
 
 import { PIXEL_ART } from "../atlas";
@@ -127,24 +128,38 @@ const AnimatedSprite = ({
  * path this file's own `object`-layer pass does, instead of duplicating the
  * animated/static switch - see PlacedItemSprite below for the version with
  * the behind/front opacity trick this file's own layers still use.
+ *
+ * Wrapped in `memo`: `item` is reference-stable for every placed item except
+ * the one actually being moved (see useWorldItems.ts's `moveItem`, which
+ * returns the same object for every item it isn't touching), and `image`/
+ * `camera`/`worldScale`/`entityScale`/`density` are all stable references
+ * too - so without `memo`, HomeScreen.tsx's `itemEntities` rebuilding its
+ * whole array on every frame of a drag (by design - see CLAUDE.md, the
+ * dragged item's own position has to update) re-rendered *every* placed
+ * item's sprite each frame, not just the one moving, each paying to tear
+ * down and rebuild its own Reanimated/Skia buffers for nothing. The more
+ * items placed, the worse that scaled - the actual cause of movement
+ * turning janky after placing/dragging a few items. See Character.tsx's
+ * matching comment and CLAUDE.md.
  */
-export const ItemVisual = ({
+export const ItemVisual = memo(function ItemVisual({
   item,
   image,
   ...entityProps
 }: {
   item: PlacedItem;
   image: SkImage | null;
-} & EntityProps) => {
+} & EntityProps) {
   const definition = ITEM_CATALOG[item.itemId];
   return definition.animation ? (
     <AnimatedSprite definition={definition} item={item} image={image} {...entityProps} />
   ) : (
     <StaticSprite definition={definition} item={item} image={image} {...entityProps} />
   );
-};
+});
 
-const PlacedItemSprite = ({
+/** Same `memo` reasoning as `ItemVisual` above - this is its behind/front-toggle wrapper. */
+const PlacedItemSprite = memo(function PlacedItemSprite({
   item,
   image,
   pass,
@@ -155,7 +170,7 @@ const PlacedItemSprite = ({
   image: SkImage | null;
   pass: LayerPass;
   characterY: SharedValue<number>;
-} & EntityProps) => {
+} & EntityProps) {
   const baseline = baselineOf(item);
 
   const opacity = useDerivedValue(() => {
@@ -173,7 +188,7 @@ const PlacedItemSprite = ({
       <ItemVisual item={item} image={image} {...entityProps} />
     </Group>
   );
-};
+});
 
 type ItemLayerProps = {
   items: PlacedItem[];

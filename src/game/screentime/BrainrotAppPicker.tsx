@@ -17,7 +17,7 @@ export function BrainrotAppPicker() {
   return (
     <DeviceActivitySelectionViewPersisted
       familyActivitySelectionId={BRAINROT_SELECTION_ID}
-      headerText="Velg appene som teller som brainrot"
+      headerText="Choose the apps that count as brainrot"
       // Without this, picking a category (e.g. "Social") ignores the apps
       // inside it for our purposes - see the type's own doc link.
       includeEntireCategory

@@ -103,7 +103,11 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    bottom: 0,
+    // Was `bottom: 0` - collided with the new tab bar (TabBar.tsx) once
+    // that started owning the bottom of the screen; this plain constant
+    // just clears its height + safe area, same spirit as this file's other
+    // hardcoded margins.
+    bottom: 110,
     justifyContent: "flex-end",
   },
   panel: {

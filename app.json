@@ -3,6 +3,7 @@
     "name": "Mindscape",
     "slug": "Mindscape",
     "version": "1.0.0",
+    "scheme": "mindscape",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -24,12 +25,23 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      ["expo-build-properties", { "ios": { "deploymentTarget": "16.4" } }],
-      ["react-native-device-activity", {
-        "appleTeamId": "D6Z2L8HVV8",
-        "appGroup": "group.com.emilskotner.mindscape",
-        "copyToTargetFolder": false
-      }]
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "16.4"
+          }
+        }
+      ],
+      [
+        "react-native-device-activity",
+        {
+          "appleTeamId": "D6Z2L8HVV8",
+          "appGroup": "group.com.emilskotner.mindscape",
+          "copyToTargetFolder": false
+        }
+      ],
+      "expo-router"
     ]
   }
 }

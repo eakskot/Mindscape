@@ -5,6 +5,7 @@ import {
   type DataSourceParam,
   type SkImage,
 } from "@shopify/react-native-skia";
+import { useIsFocused } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { StyleSheet, View, useWindowDimensions } from "react-native";
 import { useSharedValue } from "react-native-reanimated";
@@ -12,9 +13,8 @@ import { useSharedValue } from "react-native-reanimated";
 import { Character, NPC_SHEET, NPC_SHEET_2, NPC_SHEET_3 } from "../../game/Character";
 import { type DepthEntity, DepthSortedLayer } from "../../game/DepthSortedLayer";
 import { CurrencyHud } from "../../game/economy/CurrencyHud";
-import { useWallet } from "../../game/economy/useWallet";
+import { useWalletContext } from "../../game/economy/WalletContext";
 import { DevInventory } from "../../game/items/DevInventory";
-import { DevScreenTime } from "../../game/screentime/DevScreenTime";
 import { DragHighlight } from "../../game/items/DragHighlight";
 import type { EditMode } from "../../game/items/editMode";
 import { ItemLayer, ItemVisual } from "../../game/items/ItemLayer";
@@ -33,6 +33,7 @@ import { removeVillageSceneryGroup, VILLAGE } from "../../game/village/villageLa
 import { SceneryGroupVisual } from "../../game/village/SceneryGroupVisual";
 import { SceneryRemovalPrompt } from "../../game/village/SceneryRemovalPrompt";
 import { WanderingNpc } from "../../game/WanderingNpc";
+import { SettingsButton } from "../../ui/SettingsButton";
 import { useSceneGestures } from "./useSceneGestures";
 
 /**
@@ -94,9 +95,12 @@ export default function HomeScreen() {
     setSceneState({ sceneId: portal.targetScene, spawn: portal.targetSpawn });
   }, []);
 
-  // Owned here, not inside SceneStage, so it survives a scene switch (the
-  // same reason `sceneState` lives here) - see useWallet.ts.
-  const wallet = useWallet();
+  // Lifted all the way above the tab navigator now (see WalletContext.tsx) -
+  // owning it here would no longer survive switching to Shop or Screen time
+  // and back. Same API as the old `useWallet()` call this replaced.
+  const wallet = useWalletContext();
+  // See the SettingsButton render below for why this exists.
+  const isFocused = useIsFocused();
 
   // Which scenery groups have been removed - same reasoning as the wallet:
   // owned above SceneStage so walking into the house and back out doesn't
@@ -137,9 +141,18 @@ export default function HomeScreen() {
         walletBalance={wallet.balance}
         removedSceneryIds={removedSceneryIds}
         onRemoveScenery={tryRemoveScenery}
-        onAccrue={wallet.accrue}
       />
       <CurrencyHud balance={wallet.balance} />
+      {/*
+        Gated on focus - the bottom-tabs navigator keeps this screen mounted
+        when another tab is active (see CLAUDE.md "Current state"), but its
+        own hiding of inactive screens doesn't seem to fully clip a
+        `Pressable`'s native view the way it does a plain `View` (CurrencyHud
+        has no such issue) - the gear was visibly bleeding through onto every
+        other tab without this check. Scoped to just this button rather than
+        chasing the library-internals root cause.
+      */}
+      {isFocused && <SettingsButton />}
     </View>
   );
 }
@@ -151,7 +164,6 @@ function SceneStage({
   walletBalance,
   removedSceneryIds,
   onRemoveScenery,
-  onAccrue,
 }: {
   sceneId: SceneId;
   spawn: { x: number; y: number };
@@ -160,8 +172,6 @@ function SceneStage({
   removedSceneryIds: Set<string>;
   /** Spends the currency and removes the group; false if the spend failed. */
   onRemoveScenery: (id: string) => boolean;
-  /** wallet.accrue, drilled down the same way onRemoveScenery (wallet.spend) is - see useWallet.ts and DevScreenTime.tsx. */
-  onAccrue: (amount: number, source: string) => void;
 }) {
   const { width, height } = useWindowDimensions();
   const { scene, useImages } = SCENES[sceneId];
@@ -471,13 +481,6 @@ function SceneStage({
         onSetEditMode={setEditMode}
         placedCount={world.items.length}
       />
-      {/*
-        Wallet is owned in HomeScreen (see the `wallet` comment above), not
-        SceneStage, so this needs its own prop drilled down the same way
-        walletBalance is - accrue itself, not the balance, since this is the
-        one place currency gets *earned* rather than spent.
-      */}
-      <DevScreenTime accrue={onAccrue} />
     </View>
   );
 }

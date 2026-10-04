@@ -41,14 +41,25 @@ ways. What's in:
 - **Removable scenery + a currency HUD**: village scenery Tiled tags with a `group`
   property (a multi-tile tree, say `tree_04`) becomes a `SceneryGroup` - tap it to select
   (a highlight + a floating "remove for N" button), confirm to spend currency and remove it
-  for the session (collision/placement clear too). A top-right badge (`useWallet` +
-  `CurrencyHud`) shows the balance, starting at 100. See `village/villageLayout.ts`'s
-  `removeVillageSceneryGroup` and HomeScreen.tsx's `tryRemoveScenery`.
+  for the session (collision/placement clear too). A top-right badge (`CurrencyHud`) shows
+  the balance, starting at 100. See `village/villageLayout.ts`'s `removeVillageSceneryGroup`
+  and HomeScreen.tsx's `tryRemoveScenery`.
+- **Navigation + tab bar** (`expo-router`, landed 2026-10-03): a bottom tab bar - Village,
+  Shop, a center Focus action, Screen time, Profile - plus Focus and Settings as modals on
+  the root stack. See "Where this is going" #4 for the full writeup; `src/ui/TabBar/` and
+  `app/` are the entry points. `useWallet()` moved out of HomeScreen into a
+  `WalletProvider`/`useWalletContext()` (`src/game/economy/WalletContext.tsx`) wrapping the
+  root `<Stack>`, so the Village screen, Shop, Screen time and the Focus modal all read/write
+  the same wallet instance - same API as before, just lifted above the navigator so a tab
+  switch (or opening Focus) doesn't reset it. The tab bar is clean native-chrome UI
+  (`theme.ts`), never pixel art - pixel art stays in the world only.
 
-Not in: **no persistence** (everything resets on restart and on a scene switch, the wallet
-and removed-scenery set included), **no shop** (currency's only sink today is removing
-scenery), **no Screen Time integration**, **no navigation** (`App.tsx` mounts `HomeScreen`
-directly), no door art on the room's exit wall.
+Not in: **no persistence** (everything resets on app restart - the wallet, removed-scenery
+set and tab navigation state all reset to their defaults, though a tab switch alone no
+longer resets anything, see above), **no purchasing** (Shop is read-only: balance + the
+catalog's `unlocked` flag - currency's only sink is still removing scenery, and its only
+non-scenery source is the Focus modal's per-session reward), **no door art** on the room's
+exit wall.
 
 ## Where this is going (read before any big structural change)
 
@@ -168,16 +179,57 @@ un-picked when these land.
        start monitoring -> use a shielded app -> see the event fire loop on
        device. The Apple approval queue runs in parallel, only gating the
        eventual TestFlight build.
-4. **Navigation.** A shop screen, a Screen-Time settings/permission screen and the world
-   view can't all be `HomeScreen`. When a second screen is real, add a navigator
-   (`expo-router` fits the Expo setup; `@react-navigation/native` is the alternative) -
-   `HomeScreen` becomes one route.
+4. **Navigation - done (2026-10-03), `feat/tab-bar`.** `expo-router` installed
+   (`npx expo install`, so versions match SDK 57); `package.json`'s `main` is now
+   `"expo-router/entry"` - `App.tsx` and the old `index.ts` are gone, and the Reanimated
+   logger config (see the Stack section below) moved to the top of `app/_layout.tsx`, the
+   first file the router loads, to keep the same before-any-render timing.
+   - **Routes**: `app/_layout.tsx` (root `<Stack>`, wraps everything in `WalletProvider` +
+     `SafeAreaProvider`) → `(tabs)` group (`app/(tabs)/_layout.tsx`'s `<Tabs>`, custom
+     `tabBar`) with `index` (Village, = old `HomeScreen`), `shop`, `screentime`, `profile`;
+     `focus` and `settings` are modals on the root stack, not tabs.
+   - **Tab bar**: `src/ui/TabBar/` - `tabs.config.ts` (one ordered array, `kind: 'tab' |
+     'action'`, add a tab in one line), `theme.ts` (every color/radius/size/label constant),
+     `TabBar.tsx` (the custom `tabBar` prop - dark rounded-top bar, Feather icons crossfaded
+     active/inactive rather than animating the icon's own `color` prop, a green accent
+     underline, the center Focus button floating above the bar on its own `playButtonLift`).
+     No Friends tab yet (needs a backend) - a disabled row lives on Profile instead.
+   - **Wallet**: moved out of HomeScreen into `WalletProvider`/`useWalletContext()`
+     (`src/game/economy/WalletContext.tsx`), wrapping the root `<Stack>` - same `useWallet()`
+     API, just living above the navigator now so Shop, Screen time and the Focus modal share
+     the Village screen's exact instance instead of needing it drilled down.
+   - **Mounting**: bottom-tabs keeps a tab's screen mounted (hidden, not unmounted) after its
+     first focus - this is *why* switching tabs doesn't reset the Village screen's camera,
+     placed items or removed scenery. Don't add `unmountOnBlur`.
+   - **Focus modal** (`app/focus.tsx`): 15/25/45 min, countdown derived from an `endsAt`
+     timestamp (recomputed on an interval *and* on `AppState` returning to `"active"`) rather
+     than a decrementing counter, so it's correct after backgrounding. Completion calls
+     `wallet.accrue`; cancelling doesn't. **Does not shield apps yet** - that's
+     `ManagedSettings`' job (see #3), not wired here; this is a plain timer today.
+   - **Screen time tab** (`src/game/screentime/ScreenTimeScreen.tsx`): what
+     `DevScreenTime.tsx` used to be (that file is gone) - same `useScreenTime` hook and
+     `BrainrotAppPicker`, now a real screen reading `accrue` from `WalletContext` instead of
+     having it drilled through HomeScreen/SceneStage.
+   - **Three things discovered building this, worth not re-deriving** (see "Mistakes" below
+     for the full writeup of each): `expo-router` pulls in `react-native-gesture-handler` as
+     an unused transitive peer dependency (its own optional Drawer support, not a choice made
+     here); `@expo/ui@57.0.21` (bundled inside `expo-router`, powering native-tabs support
+     this app doesn't use) fails to compile against this SDK's `expo-modules-core` - excluded
+     via `package.json`'s `expo.autolinking.exclude`; and Expo's **precompiled modules**
+     feature ships a version-skewed `ExpoFont`/`ExpoModulesCore` pair that crashes on launch
+     (`dyld: Symbol not found: ...BaseModule...willDestroy...`) - disabled via
+     `ios/Podfile.properties.json`'s `EXPO_USE_PRECOMPILED_MODULES: false` (that file is
+     gitignored, so a fresh `expo prebuild` needs this reapplied - see "Running it").
 
 ## Stack
 
 Versions are in `package.json` (Expo SDK 57, RN 0.86, Reanimated 4, Skia 2.6). Deliberately
-**no gesture-handler** (PanResponder everywhere), **no state library**, **no navigator**,
-**no test runner** - don't add one without deciding to migrate. `/ios` and `/android` are
+**no state library**, **no test runner** - don't add one without deciding to migrate.
+`expo-router` (see "Where this is going" #4) is the one navigator. `react-native-gesture-
+handler` is present as a native pod - `expo-router` lists it as a peer dependency for its own
+optional Drawer navigator, which this app doesn't use - but **no app code imports it and
+nothing wraps the app in `GestureHandlerRootView`**: all world input is still one
+`PanResponder` (`useSceneGestures.ts`), untouched by its presence. `/ios` and `/android` are
 generated by `expo prebuild` and gitignored.
 
 **`[Reanimated] Reading from \`value\` during component render` in the log is a known
@@ -191,9 +243,10 @@ low-level `startMapper` straight in the hook body (not inside a `useEffect`), wh
 Reanimated's strict-mode patch can't tell apart from a real violation - the same class of
 report filed against other libraries after Reanimated 3.16 added this logger (e.g.
 gorhom/react-native-bottom-sheet#1983). Fixed by turning the *strict* class of check off
-(not the logger entirely) in `index.ts`'s `configureReanimatedLogger` call - re-derive this
-from scratch only if a genuinely new instance shows up somewhere this reasoning doesn't
-cover.
+(not the logger entirely) in `app/_layout.tsx`'s `configureReanimatedLogger` call (moved
+there from the old `index.ts` when `expo-router` landed - see "Where this is going" #4) -
+re-derive this from scratch only if a genuinely new instance shows up somewhere this
+reasoning doesn't cover.
 
 ## Running it
 
@@ -205,20 +258,69 @@ xcrun simctl openurl booted "exp+mindscape://expo-development-client/?url=http%3
 xcrun simctl io booted screenshot /tmp/shot.png
 ```
 
+**After installing a new native dependency, restart Metro with `--clear`, not just
+reload.** A Metro instance already running when a package like `expo-router` is added keeps
+the old `babel-preset-expo` state in its worker processes - its JS-side symptom is
+`Invalid call at line 2: process.env.EXPO_ROUTER_APP_ROOT ... First argument of
+\`require.context\` should be a string`, which reads like an app bug but is purely "Metro
+started before this dependency existed." Kill it and run
+`npx expo start --dev-client --clear`.
+
+**`ios/Podfile.properties.json` is gitignored and carries a required local override**:
+`"EXPO_USE_PRECOMPILED_MODULES": "false"`. Without it, `pod install` links Expo's
+precompiled `ExpoFont`/`ExpoModulesCore` xcframeworks for this exact SDK 57.0.21 pin, which
+are version-skewed against each other and crash on launch with `dyld: Symbol not found:
+...BaseModule...willDestroy...` - a real upstream bug, not anything in this repo. The
+tradeoff is build time: with it `false`, every Expo module compiles from source instead of
+linking a prebuilt binary, which is dramatically slower (tens of minutes, not seconds) the
+first time after a clean `Pods`/`DerivedData` wipe. Flip it back to `"true"` to test whether
+a future Expo SDK patch has fixed the mismatch - don't carry this override forward out of
+habit once it's safe to drop.
+
+**A small floating "Tools" button with a gear icon appears on every screen in a
+dev-client build** (briefly animates in near the top-right after launch) - that's
+`expo-dev-client`'s own dev-menu affordance, rendered outside this app's React tree
+entirely. It's easy to mistake for a bug in the Settings gear button (`SettingsButton.tsx`,
+top-right of the Village screen) since they land in roughly the same corner - it is not
+part of the app and will not appear in a production or TestFlight build.
+
 Run `npx expo run:ios` only when native code or dependencies change. `npx tsc --noEmit`
 must be green before anything is "done" - there is **no ESLint config and no test runner**,
 so tsc + a screenshot is the whole safety net.
 
 ## Architecture
 
-`App.tsx` is a thin wrapper. `src/screens/HomeScreen/` holds the world view;
-`src/game/` holds everything reusable.
+`app/` is `expo-router`'s route tree (thin - each file mostly re-exports or thinly wraps a
+`src/` component). `src/screens/HomeScreen/` holds the world view; `src/game/` holds
+everything reusable; `src/ui/` holds navigation chrome that isn't the world.
+
+### Routes (`app/`)
+
+| File | Responsibility |
+|---|---|
+| `_layout.tsx` | Root `<Stack>`: wraps everything in `SafeAreaProvider` + `WalletProvider`, holds the Reanimated logger config (see "Running it" - this is the first file the router loads). Declares `(tabs)` plus `focus`/`settings` as modals. |
+| `(tabs)/_layout.tsx` | The `<Tabs>` navigator - `tabBar={(props) => <TabBar {...props} />}` replaces the default chrome entirely (see `src/ui/TabBar/`). Screen names here must match `tabs.config.ts`'s `route` values. |
+| `(tabs)/index.tsx` | Re-exports `HomeScreen` (Village) - see below. |
+| `(tabs)/shop.tsx` | Read-only item catalog + balance - see `itemCatalog.ts`. No purchasing yet. |
+| `(tabs)/screentime.tsx` | Re-exports `ScreenTimeScreen` (`src/game/screentime/`) - see "Where this is going" #3. |
+| `(tabs)/profile.tsx` | Placeholder; the one real thing on it is the disabled "Friends - coming soon" row. |
+| `focus.tsx` | The Focus session modal - duration picker, `endsAt`-timestamp countdown, `wallet.accrue` on completion. See "Where this is going" #4 for the backgrounding-safety reasoning. |
+| `settings.tsx` | Placeholder modal, opened from the Village screen's gear button. |
+
+### Navigation chrome (`src/ui/`)
+
+| File | Responsibility |
+|---|---|
+| `TabBar/tabs.config.ts` | The bottom bar's content, left to right, as one array (`kind: 'tab' \| 'action'`) - `TabBar.tsx` and `(tabs)/_layout.tsx` both derive from it. Add a tab here + its route file, nothing else to touch. |
+| `TabBar/theme.ts` | Every color/radius/size/label constant the tab bar (and Focus/Shop/Screen time/Profile/Settings) draws from. |
+| `TabBar/TabBar.tsx` | The custom `tabBar`. Crossfades two stacked Feather icons (grey/white) rather than animating the glyph's own `color` prop - robust regardless of how `@expo/vector-icons` merges an animated style internally. The center Focus button is a flex spacer with an absolutely-positioned circle poking up out of it (`playButtonLift`), so it keeps the bar's 5 equal slots while floating above the bar's top edge. |
+| `SettingsButton.tsx` | The Village screen's gear button → `/settings`. Gated on `useIsFocused()` in HomeScreen.tsx - bottom-tabs' hiding of an unfocused screen didn't fully clip this `Pressable`'s native view without it (plain `View`s like `CurrencyHud` weren't affected). |
 
 ### The world view (`src/screens/HomeScreen/`)
 
 | File | Responsibility |
 |---|---|
-| `HomeScreen.tsx` | `HomeScreen` owns which scene is active (a `SCENES` lookup, remounted on portal), the wallet, and which scenery has been removed - all above `SceneStage` so a scene switch doesn't reset them. `SceneStage` mounts the scene's hooks, composes `depthEntities` (bands + `SceneryGroup`s + items), and renders the Canvas + the removal prompt. ~440 lines - **keep it composition-only**; new mechanics go in a hook. |
+| `HomeScreen.tsx` | `HomeScreen` owns which scene is active (a `SCENES` lookup, remounted on portal) and which scenery has been removed - above `SceneStage` so a scene switch doesn't reset them. The wallet itself now lives in `WalletContext` above the whole navigator, not here (see "Where this is going" #4) - `HomeScreen` just reads it via `useWalletContext()`. `SceneStage` mounts the scene's hooks, composes `depthEntities` (bands + `SceneryGroup`s + items), and renders the Canvas + the removal prompt. ~440 lines - **keep it composition-only**; new mechanics go in a hook. |
 | `useSceneGestures.ts` | The one `PanResponder` for the view - multiplexes pinch / item-drag / camera-pan / tap-to-walk, built once, reads state through refs + `useCamera`'s live values. Owns the drag-highlight state. |
 
 ### Engine (`src/game/`)

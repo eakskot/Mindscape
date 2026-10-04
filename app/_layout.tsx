@@ -1,9 +1,15 @@
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { useEffect } from "react";
 import { configureReanimatedLogger, ReanimatedLogLevel } from "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { WalletProvider } from "../src/game/economy/WalletContext";
+import { EngineProvider } from "../src/game/engine/EngineProvider";
+import {
+  ensureNotificationPermission,
+  registerNotificationTapHandler,
+} from "../src/game/engine/notifications";
 
 // Reanimated's "strict mode" logger (default on since Reanimated 3.16) warns
 // on any `.value` read outside a worklet/useDerivedValue/event-handler - a
@@ -31,22 +37,33 @@ configureReanimatedLogger({ level: ReanimatedLogLevel.warn, strict: false });
 
 /**
  * The root stack: the tab group plus the screens that float above it as
- * modals (Focus, Settings - see CLAUDE.md "Where this is going" #4).
+ * modals (Focus, Settings, Tickets, Summary).
  *
- * `WalletProvider` wraps everything here, not just the tab group, so Focus's
- * completion reward (`wallet.accrue`) and the Village screen underneath it
- * share the exact same wallet instance - see WalletContext.tsx.
+ * `WalletProvider` wraps everything here, not just the tab group, so the
+ * Focus/Tickets modals and the Village screen underneath share the exact
+ * same wallet instance - see WalletContext.tsx. `EngineProvider` lives
+ * inside it (the ticket engine pays through the wallet, so the wallet has
+ * to exist first) - see EngineProvider.tsx.
  */
 export default function RootLayout() {
+  useEffect(() => {
+    void ensureNotificationPermission();
+    return registerNotificationTapHandler();
+  }, []);
+
   return (
     <SafeAreaProvider>
       <WalletProvider>
-        <StatusBar style="light" />
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="focus" options={{ presentation: "modal" }} />
-          <Stack.Screen name="settings" options={{ presentation: "modal" }} />
-        </Stack>
+        <EngineProvider>
+          <StatusBar style="light" />
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="focus" options={{ presentation: "modal" }} />
+            <Stack.Screen name="settings" options={{ presentation: "modal" }} />
+            <Stack.Screen name="tickets" options={{ presentation: "modal" }} />
+            <Stack.Screen name="summary" options={{ presentation: "modal" }} />
+          </Stack>
+        </EngineProvider>
       </WalletProvider>
     </SafeAreaProvider>
   );

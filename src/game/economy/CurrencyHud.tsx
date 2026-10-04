@@ -5,17 +5,15 @@ type CurrencyHudProps = {
 };
 
 /**
- * Fixed top-right balance badge. Purely presentational - HomeScreen owns the
- * wallet (see useWallet.ts) and passes the number down, the same split
- * DevInventory uses for edit mode. `pointerEvents="none"` since it's a
- * read-out, not a button - it must never steal a touch from the world view
- * underneath it.
+ * The balance badge - presentational only, HomeScreen owns the wallet (see
+ * useWallet.ts) and passes the number down, the same split DevInventory
+ * uses for edit mode. `pointerEvents="none"` since it's a read-out, not a
+ * button - it must never steal a touch from the world view underneath it.
  *
- * Not safe-area-aware (same as DevInventory's hardcoded margins elsewhere in
- * this screen) - `top: 56` is a plain constant chosen to clear the notch /
- * Dynamic Island on current iPhones, not a real inset. Worth revisiting with
- * `react-native-safe-area-context` if this ever needs to be pixel-exact
- * across devices.
+ * Not positioned itself - HomeScreen.tsx places it in a row next to
+ * `TicketChip` (see engine/TicketChip.tsx), both under one absolutely
+ * positioned wrapper (`topRightRow`). Used to carry its own `top: 56,
+ * right: 12`; that offset lives on the wrapper now.
  */
 export const CurrencyHud = ({ balance }: CurrencyHudProps) => (
   <View style={styles.root} pointerEvents="none">
@@ -26,9 +24,6 @@ export const CurrencyHud = ({ balance }: CurrencyHudProps) => (
 
 const styles = StyleSheet.create({
   root: {
-    position: "absolute",
-    top: 56,
-    right: 12,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,

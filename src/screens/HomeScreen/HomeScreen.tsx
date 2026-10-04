@@ -14,6 +14,8 @@ import { Character, NPC_SHEET, NPC_SHEET_2, NPC_SHEET_3 } from "../../game/Chara
 import { type DepthEntity, DepthSortedLayer } from "../../game/DepthSortedLayer";
 import { CurrencyHud } from "../../game/economy/CurrencyHud";
 import { useWalletContext } from "../../game/economy/WalletContext";
+import { TicketChip } from "../../game/engine/TicketChip";
+import { getJSON, setJSON, StorageKeys } from "../../game/engine/storage";
 import { DevInventory } from "../../game/items/DevInventory";
 import { DragHighlight } from "../../game/items/DragHighlight";
 import type { EditMode } from "../../game/items/editMode";
@@ -104,11 +106,23 @@ export default function HomeScreen() {
 
   // Which scenery groups have been removed - same reasoning as the wallet:
   // owned above SceneStage so walking into the house and back out doesn't
-  // bring a chopped-down tree back. Resets on app restart, same as the
-  // wallet - no persistence layer yet (see CLAUDE.md).
-  const [removedSceneryIds, setRemovedSceneryIds] = useState<Set<string>>(
-    () => new Set(),
-  );
+  // bring a chopped-down tree back. Persisted (see engine/storage.ts) since
+  // removal spends real coins - losing it on restart would mean the trees
+  // come back but the coins don't. The *persisted set* only remembers
+  // which ids were removed; `villageLayout.ts`'s collision/placement grids
+  // are plain in-memory module state that resets on every JS load, so each
+  // one has to be re-applied via `removeVillageSceneryGroup` here too, not
+  // just remembered.
+  const [removedSceneryIds, setRemovedSceneryIds] = useState<Set<string>>(() => {
+    const saved = getJSON<string[]>(StorageKeys.removedScenery);
+    const ids = new Set(saved ?? []);
+    ids.forEach((id) => removeVillageSceneryGroup(id));
+    return ids;
+  });
+
+  useEffect(() => {
+    setJSON(StorageKeys.removedScenery, Array.from(removedSceneryIds));
+  }, [removedSceneryIds]);
 
   // The one thing currency currently buys. `removeVillageSceneryGroup`
   // clears the *village's* collision/placement grids specifically (it's
@@ -142,7 +156,10 @@ export default function HomeScreen() {
         removedSceneryIds={removedSceneryIds}
         onRemoveScenery={tryRemoveScenery}
       />
-      <CurrencyHud balance={wallet.balance} />
+      <View style={styles.topRightRow} pointerEvents="box-none">
+        <TicketChip />
+        <CurrencyHud balance={wallet.balance} />
+      </View>
       {/*
         Gated on focus - the bottom-tabs navigator keeps this screen mounted
         when another tab is active (see CLAUDE.md "Current state"), but its
@@ -492,5 +509,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#15151d",
+  },
+  // Replaces CurrencyHud's own former `position: absolute, top: 56, right:
+  // 12` - now the row wrapper owns that offset, with TicketChip alongside
+  // it (see engine/TicketChip.tsx). `box-none` so the gaps around the two
+  // chips (and between this row and SettingsButton below it) still let
+  // world taps through.
+  topRightRow: {
+    position: "absolute",
+    top: 56,
+    right: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
 });

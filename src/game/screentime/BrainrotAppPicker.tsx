@@ -2,11 +2,12 @@ import { useState } from "react";
 import { Pressable, StyleSheet, Text } from "react-native";
 import { DeviceActivitySelectionSheetViewPersisted } from "react-native-device-activity";
 
-import { BRAINROT_SELECTION_ID } from "./useScreenTime";
+import { BRAINROT_SELECTION_ID } from "../engine/config";
 
 /**
- * Lets the user choose which apps/categories count toward the daily budget
- * (see useScreenTime.ts). The native "Persisted" picker variant stores the
+ * Lets the user choose which 1-3 "brainrot" apps get locked once the engine
+ * is armed (see engine/config.ts and engineLogic.ts). The native "Persisted"
+ * picker variant stores the
  * selection under `familyActivitySelectionId` itself - we never learn which
  * apps were picked (Apple's privacy model: opaque tokens only), just this
  * fixed id to refer back to it by.
@@ -21,7 +22,7 @@ import { BRAINROT_SELECTION_ID } from "./useScreenTime";
  * variant presents as a proper native modal instead of embedding inline, so
  * a broken/blank render can't block the rest of the screen - see CLAUDE.md.
  *
- * Needs FamilyControls authorization already granted (useScreenTime's
+ * Needs FamilyControls authorization already granted (useAuthorization's
  * `requestAccess`) - presenting before that has happened is untested; the
  * caller is expected to gate on `isAuthorized`.
  */

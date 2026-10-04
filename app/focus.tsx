@@ -1,82 +1,88 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useWalletContext } from "../src/game/economy/WalletContext";
+import { useEngine } from "../src/game/engine/EngineProvider";
+import { formatMMSS } from "../src/ui/formatDuration";
 import { theme } from "../src/ui/TabBar/theme";
+import { useCountdown } from "../src/ui/useCountdown";
 
-const DURATIONS_MINUTES = [15, 25, 45] as const;
+/** How long the second "give up" tap stays armed before reverting - see `confirmingGiveUp` below. */
+const GIVE_UP_CONFIRM_WINDOW_MS = 3000;
 
 /**
- * The Focus modal, opened from the tab bar's center Play button (see
- * TabBar.tsx). Picks a duration, counts down, and rewards the wallet on
- * natural completion - cancelling pays nothing.
+ * The Focus modal, opened from the tab bar's center Play button. Now drives
+ * the real engine (see EngineProvider.tsx) instead of a local timer:
+ * starting/ending/completing all go through `engineLogic.ts`'s pure
+ * functions, so "while it runs, tickets can't be started, and an active
+ * ticket is ended immediately" and "only counts if the engine is armed"
+ * are enforced in one place, not duplicated here.
  *
- * The countdown is derived from an `endsAt` timestamp, not a decrementing
- * counter - a `setInterval` tick just recomputes `endsAt - Date.now()`, so
- * backgrounding the app (timers pause, the clock doesn't) can never leave
- * the session "stuck" or let someone dodge a tick. An AppState listener
- * forces one extra recompute the moment the app comes back to the
- * foreground, so the result is visible immediately rather than waiting for
- * the next interval tick.
+ * `engine.state.activeFocus` (not local state) is the source of truth, so
+ * reopening this modal mid-session (e.g. after the app was backgrounded
+ * and the OS kept the process alive) shows the real remaining time, not a
+ * reset timer.
  *
- * In-memory only, same as every other piece of state in this app (see
- * useWallet.ts) - leaving the modal or killing the app abandons the running
- * session with no reward, there's nothing to resume into yet.
- *
- * TODO(Screen Time): this does not yet shield the chosen apps for the
- * session's duration - that's ManagedSettings' job (see CLAUDE.md "Where
- * this is going" #3), not wired here. Today this is a plain timer; the
- * actual "locked out of other apps" behavior lands when that does.
+ * Natural completion: the countdown hitting zero while this screen is open
+ * calls `forceReconcile()` itself (reconcile normally only runs at startup
+ * and on AppState "active" - see EngineProvider.tsx - neither of which
+ * fires just from watching a number count down in the foreground). The
+ * backgrounded case is already covered by that AppState reconcile.
  */
 export default function FocusScreen() {
   const insets = useSafeAreaInsets();
-  const wallet = useWalletContext();
+  const engine = useEngine();
+  const { config, state } = engine;
 
-  const [selectedMinutes, setSelectedMinutes] = useState<number>(DURATIONS_MINUTES[1]);
-  const [endsAt, setEndsAt] = useState<number | null>(null);
-  const [remainingMs, setRemainingMs] = useState(0);
-  // Avoids a double-accrue: the completion effect below can run once more
-  // (e.g. the AppState recompute firing right after the interval already
-  // did) before `endsAt` itself gets cleared.
-  const awardedRef = useRef(false);
+  const [selectedMinutes, setSelectedMinutes] = useState<number>(
+    config.FOCUS_OPTIONS_MIN[1] ?? config.FOCUS_OPTIONS_MIN[0],
+  );
+  const [confirmingGiveUp, setConfirmingGiveUp] = useState(false);
+  const giveUpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const activeFocus = state.activeFocus;
+  const remaining = useCountdown(activeFocus?.endsAt);
+  const completedRef = useRef(false);
 
   useEffect(() => {
-    if (endsAt === null) return;
+    if (!activeFocus) {
+      completedRef.current = false;
+      return;
+    }
+    if (remaining === 0 && !completedRef.current) {
+      completedRef.current = true;
+      engine.forceReconcile();
+      router.back();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remaining, activeFocus]);
 
-    const recompute = () => setRemainingMs(Math.max(0, endsAt - Date.now()));
-    recompute();
-    const interval = setInterval(recompute, 250);
-    const appStateSub = AppState.addEventListener("change", (state) => {
-      if (state === "active") recompute();
-    });
+  useEffect(() => {
     return () => {
-      clearInterval(interval);
-      appStateSub.remove();
+      if (giveUpTimer.current) clearTimeout(giveUpTimer.current);
     };
-  }, [endsAt]);
+  }, []);
 
-  useEffect(() => {
-    if (endsAt === null || remainingMs > 0 || awardedRef.current) return;
-    awardedRef.current = true;
-    wallet.accrue(selectedMinutes, "focus");
-    setEndsAt(null);
+  const start = () => engine.startFocus(selectedMinutes);
+
+  const pressGiveUp = () => {
+    if (!confirmingGiveUp) {
+      setConfirmingGiveUp(true);
+      giveUpTimer.current = setTimeout(
+        () => setConfirmingGiveUp(false),
+        GIVE_UP_CONFIRM_WINDOW_MS,
+      );
+      return;
+    }
+    if (giveUpTimer.current) clearTimeout(giveUpTimer.current);
+    setConfirmingGiveUp(false);
+    engine.giveUpFocus();
     router.back();
-  }, [remainingMs, endsAt, selectedMinutes, wallet]);
-
-  const start = () => {
-    awardedRef.current = false;
-    setEndsAt(Date.now() + selectedMinutes * 60_000);
   };
 
-  const cancel = () => {
-    // No accrue call - cancelling a session earns nothing.
-    setEndsAt(null);
-  };
-
-  const isRunning = endsAt !== null;
+  const isRunning = activeFocus !== null;
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + 16 }]}>
@@ -95,8 +101,14 @@ export default function FocusScreen() {
       {!isRunning ? (
         <>
           <Text style={styles.body}>Choose a session length.</Text>
+          {!state.armed && (
+            <Text style={styles.warning}>
+              The engine isn't armed yet - this focus session will run, but won't pay coins
+              (see the Screen time tab).
+            </Text>
+          )}
           <View style={styles.durationRow}>
-            {DURATIONS_MINUTES.map((minutes) => (
+            {config.FOCUS_OPTIONS_MIN.map((minutes) => (
               <Pressable
                 key={minutes}
                 style={[styles.chip, selectedMinutes === minutes && styles.chipSelected]}
@@ -120,22 +132,19 @@ export default function FocusScreen() {
       ) : (
         <>
           <View style={styles.countdownBox}>
-            <Text style={styles.countdown}>{formatRemaining(remainingMs)}</Text>
+            <Text style={styles.countdown}>
+              {remaining !== null ? formatMMSS(remaining) : "--:--"}
+            </Text>
           </View>
-          <Pressable style={styles.secondaryButton} onPress={cancel}>
-            <Text style={styles.secondaryButtonText}>Cancel</Text>
+          <Pressable style={styles.secondaryButton} onPress={pressGiveUp}>
+            <Text style={styles.secondaryButtonText}>
+              {confirmingGiveUp ? "Tap again to give up - no reward" : "Give up"}
+            </Text>
           </Pressable>
         </>
       )}
     </View>
   );
-}
-
-function formatRemaining(ms: number): string {
-  const totalSeconds = Math.ceil(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
 const styles = StyleSheet.create({
@@ -158,6 +167,11 @@ const styles = StyleSheet.create({
   body: {
     color: theme.colors.textSecondary,
     fontSize: 14,
+    marginBottom: 16,
+  },
+  warning: {
+    color: theme.colors.danger,
+    fontSize: 13,
     marginBottom: 16,
   },
   durationRow: {

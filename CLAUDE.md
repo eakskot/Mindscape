@@ -45,21 +45,31 @@ ways. What's in:
   the balance, starting at 100. See `village/villageLayout.ts`'s `removeVillageSceneryGroup`
   and HomeScreen.tsx's `tryRemoveScenery`.
 - **Navigation + tab bar** (`expo-router`, landed 2026-10-03): a bottom tab bar - Village,
-  Shop, a center Focus action, Screen time, Profile - plus Focus and Settings as modals on
-  the root stack. See "Where this is going" #4 for the full writeup; `src/ui/TabBar/` and
-  `app/` are the entry points. `useWallet()` moved out of HomeScreen into a
-  `WalletProvider`/`useWalletContext()` (`src/game/economy/WalletContext.tsx`) wrapping the
-  root `<Stack>`, so the Village screen, Shop, Screen time and the Focus modal all read/write
-  the same wallet instance - same API as before, just lifted above the navigator so a tab
-  switch (or opening Focus) doesn't reset it. The tab bar is clean native-chrome UI
-  (`theme.ts`), never pixel art - pixel art stays in the world only.
+  Shop, a center Focus action, Screen time, Profile - plus Focus/Settings/Tickets/Summary as
+  modals on the root stack. See "Where this is going" #4 for the full writeup; `src/ui/TabBar/`
+  and `app/` are the entry points. The tab bar is clean native-chrome UI (`theme.ts`), never
+  pixel art - pixel art stays in the world only.
+- **The ticket engine** (landed 2026-10-04, `feat/ticket-engine`): real Screen Time blocking,
+  not a mock. "Brainrot" apps are locked all the time once armed; 3 tickets/day unlock them
+  for 20 min each (60 min cooldown between), a once-daily emergency valve, and Focus sessions
+  that pay coins. See "Where this is going" #3 for the full writeup - `src/game/engine/` is
+  the core (pure rules in `engineLogic.ts`, native calls only in `deviceActivityBridge.ts`,
+  both wired together by `EngineProvider.tsx`/`useEngine()`). **Verified Phase 0-only so far**
+  (the raw block/unblock/shield mechanism works on a physical iPhone - see Phase 0's commit);
+  the actual ticket/cooldown/day-rollover rules built on top in Phase 1 have **not yet been
+  exercised on-device** (Phase 3) - say so plainly if asked, don't imply otherwise.
+- **Persistence** (landed 2026-10-04, alongside the engine): the wallet (+ last-100
+  transaction ledger), the ticket engine's whole state, and the removed-scenery set now
+  survive an app restart - see `engine/storage.ts` (a thin JSON-over-`userDefaultsSet/Get`
+  wrapper, no new native dependency) and "Where this is going" #1. Placed items and the
+  active scene/camera still don't - that part of #1 is still open.
 
-Not in: **no persistence** (everything resets on app restart - the wallet, removed-scenery
-set and tab navigation state all reset to their defaults, though a tab switch alone no
-longer resets anything, see above), **no purchasing** (Shop is read-only: balance + the
-catalog's `unlocked` flag - currency's only sink is still removing scenery, and its only
-non-scenery source is the Focus modal's per-session reward), **no door art** on the room's
-exit wall.
+Not in: **placed-item/scene persistence** (the wallet, engine state and removed scenery
+survive a restart now, but switching scenes or restarting still drops placed furniture -
+see "Where this is going" #1), **no purchasing** (Shop is read-only: balance + the catalog's
+`unlocked` flag - currency's only sink is still removing scenery; sources are now the ticket
+engine's daily settlement, Focus sessions, and two one-time bonuses - see "Where this is
+going" #2-#3), **no door art** on the room's exit wall.
 
 ## Where this is going (read before any big structural change)
 
@@ -67,118 +77,134 @@ The reward loop is: **reduced phone use -> currency -> unlock/buy decor**. Every
 below is a prerequisite, roughly in order. Design new code so it doesn't have to be
 un-picked when these land.
 
-1. **Persistence.** The single most valuable next step and a prerequisite for the rest.
-   `useWorldItems` already has `serialize`/`restore` and the placed-item shape (`{itemId,
-   x, y}`) is final - just not wired to storage. **The seam that has to move:** per-scene
-   item state currently lives *inside* `SceneStage`, which remounts on every scene switch,
-   so switching village<->room drops placements. It needs to live *above* `SceneStage` -
-   a store (plain module + `useSyncExternalStore`, or a context) keyed by `sceneId`,
-   loaded once at startup, saved on change. Pick the storage tech first (`expo-sqlite`,
-   `react-native-mmkv`, or `@react-native-async-storage/async-storage` - MMKV is the
-   fastest and simplest for a key-value blob; SQLite if the data model grows).
-2. **Currency / wallet.** `useWallet()` (`game/economy/`) already exists with `balance`,
-   `accrue(amount, source)`, `spend(amount)` - source-agnostic on purpose, so a daily
-   check-in, a timer, and later a Screen-Time threshold event can all just call `accrue`
-   without this hook changing. Its first (only) spender today is removing scenery
-   (`HomeScreen.tsx`'s `tryRemoveScenery`, a flat cost per group). **Not persisted** - that
-   still needs #1 above; once it lands, `useWallet` is the thing to wire to storage. The
-   eventual shop reads `balance` and calls `spend` the same way; unlocking is
-   `itemCatalog`'s job (it already models "unlocked" - see `unlockedItems()`).
-3. **Screen Time / Family Controls.** Ties rewards to real reduced phone use - the actual
-   point. Facts so this doesn't need re-researching:
-   - The community package `react-native-device-activity` wraps Apple's
-     `FamilyControls` / `DeviceActivity` / `ManagedSettings`.
-   - Needs (a) Apple's approval of a **"Family Controls (Distribution)" entitlement** -
-     apply early, it's an external bottleneck on its own timeline; (b) **native iOS app
-     extensions**, which means adding **config plugins** and running `expo prebuild`
-     (the repo is already set up for Continuous Native Generation - `/ios` and `/android`
-     are gitignored, regenerated by prebuild - so this is a config-plugin + `prebuild`
-     change, not a rewrite, but it does move the dev loop onto a native build). EAS Build
-     for distribution.
-   - Apple does **not** expose raw per-app usage minutes to third parties - only
-     threshold-crossing **events** and an Apple-rendered report view. So the reward loop
-     must be designed around *events* (crossed 30 min under budget -> `accrue(...)`), not
-     a live counter.
+1. **Persistence - partly done (2026-10-04).** The wallet (+ ledger), the whole ticket
+   engine, and the removed-scenery set now survive a restart - see `engine/storage.ts`, a
+   thin JSON-over-`userDefaultsSet/Get` wrapper (the same shared UserDefaults the native
+   extensions themselves read/write - no new native dependency). **Still open:** placed
+   items. `useWorldItems` already has `serialize`/`restore` and the placed-item shape
+   (`{itemId, x, y}`) is final - just not wired to storage. **The seam that has to move:**
+   per-scene item state currently lives *inside* `SceneStage`, which remounts on every scene
+   switch, so switching village<->room drops placements. It needs to live *above*
+   `SceneStage` - a store (plain module + `useSyncExternalStore`, or a context) keyed by
+   `sceneId`, loaded once at startup, saved on change. Reuse `engine/storage.ts` for this
+   too rather than reaching for MMKV/SQLite/AsyncStorage - nothing so far has needed
+   anything storage.ts can't do.
+2. **Currency / wallet / economy - done (2026-10-04).** `useWallet()` (`game/economy/`) has
+   `balance`, `accrue(amount, source)`, `spend(amount, source?)`, and now `ledger` (last 100
+   `{t, amount, source}` entries). Persisted and hydrated synchronously at startup via
+   `WalletContext.tsx` - see #1. Every reward amount lives in `economy/economyConfig.ts`
+   (`ECONOMY`); `economy/settleDay.ts` is the pure function that turns one day's engine
+   state into a coin total + new streak (unused tickets, clean-day bonus, streak daily bonus
+   + milestones) - see #3 for how it's actually triggered. The eventual shop reads `balance`
+   and calls `spend` the same way; unlocking is `itemCatalog`'s job (it already models
+   "unlocked" - see `unlockedItems()`) - shop prices are already defined in
+   `economyConfig.ts`'s `SHOP_PRICES`, purchasing itself isn't wired yet.
+3. **Screen Time / Family Controls - the ticket engine, built 2026-10-04 (`feat/ticket-engine`),
+   verified on-device only through Phase 0 so far.** Ties rewards to real reduced phone use.
+   The rules (decided, don't redesign without asking): 1-3 "brainrot" apps are locked all the
+   time once armed; a day has 3 tickets of 20 min that unlock everything, 60 min cooldown
+   between; a day runs 04:00->04:00, not midnight->midnight; a once-daily emergency valve
+   (60s hold, 10 min unlock, zeroes the rest of that day's coin income but never claws back
+   coins already earned); Focus sessions (15/25/45/60 min, or fast-mode 1/2/3/4) pay coins on
+   completion, nothing on giving up, and only count if the engine is armed - starting one
+   ends an active ticket immediately.
+
+   **Why it's built the way it is:**
+   - `react-native-device-activity` wraps Apple's `FamilyControls`/`DeviceActivity`/
+     `ManagedSettings`. Real API surface actually used (verified against `src/index.ts` and
+     the types file, not just the README): `blockSelection`/`unblockSelection` (take
+     `{activitySelectionId}`), `startMonitoring`/`stopMonitoring` + `configureActions`
+     (writes `actions_for_<activity>_<callback>` to UserDefaults; the DeviceActivityMonitor
+     extension itself reads and executes it on that callback - this is what re-blocks even
+     with the app killed), `updateShield`, `isShieldActive`, `userDefaultsSet/Get`.
+   - **Never base blocking or rewards on `eventDidReachThreshold` or any live-usage
+     signal** - Apple doesn't expose real per-app usage minutes to third parties, only
+     unreliable threshold-crossing events (this is what the old daily-budget design used
+     and why it's gone - see below). The entire engine runs on **wall-clock timestamps**
+     only: `startTicket` records `endsAt = now + TICKET_MIN`, a native one-shot
+     `DeviceActivitySchedule` fires the re-block at that exact time via `intervalDidStart`,
+     and `reconcile()` (JS-side bookkeeping) catches up whenever the app is next opened.
+     Failure direction: if monitoring can't be confirmed, **fail open** (apps stay
+     unlocked) and **never pay a reward on an uncertain signal**.
+   - `DeviceActivitySchedule` silently misbehaves under ~15 minutes (Apple's own
+     constraint) - `deviceActivityBridge.ts`'s `scheduleReblock` always pads the window to
+     16 minutes regardless of how short the real ticket/emergency is.
+   - One fixed `DeviceActivityName` ("ticketEnd") for every reblock - Apple caps concurrent
+     monitors at 20, and this app never needs more than one pending reblock at a time, so
+     `scheduleReblock` always stops the previous one before starting the next rather than
+     accumulating names.
    - iOS only, no Android equivalent. Since iOS 16.4-ish a user can self-authorize (not
      just a parent for a child), which is the case here (monitoring yourself).
 
-   **Status (started 2026-09-27):**
-   - Real bundle identifier set: `com.emilskotner.mindscape` (was the Expo placeholder
-     `com.anonymous.Mindscape`). Apple team ID `D6Z2L8HVV8` is in `app.json`
-     (`ios.appleTeamId` and the plugin config).
-   - `react-native-device-activity` + `expo-build-properties` installed;
-     `app.json`'s `plugins` has both, `deploymentTarget` bumped to `16.4` (the
-     `expo-build-properties` plugin itself refuses anything lower - individual,
-     self-monitoring authorization needs it).
-   - `targets/` (ActivityMonitorExtension, ShieldAction, ShieldConfiguration - the
-     Screen Time app extensions, `@kingstinct/expo-apple-targets`' convention) is
-     scaffolded and committed. **One deliberate deviation from upstream:** the
-     plugin's `withCopyTargetFolder` step copies a `Shared.swift` into each target
-     folder; on this machine's Claude-Cowork device bridge that exact path was
-     reliably blocked (permission-denied at the bridge level, unrelated to real
-     filesystem permissions - some other path collided with an internal reserved
-     pattern). Worked around by renaming it to `DeviceActivityShared.swift`
-     (functionally identical - Swift doesn't care about filenames within a target)
-     and disabling the plugin's own copy step (`"copyToTargetFolder": false` in
-     `app.json`, since `targets/` is now hand-scaffolded and shouldn't be
-     overwritten). The rename is patched into `node_modules` via `patch-package`
-     (`patches/react-native-device-activity+0.6.1.patch`, runs on every `npm
-     install` via the `postinstall` script) so it survives a fresh install. If
-     this doesn't apply cleanly against a future version bump, that's why -
-     re-diff against the new version's `config-plugin/withCopyTargetFolder.js`.
-   - `src/game/screentime/` has `useScreenTime.ts` (authorization, monitoring
-     schedule/threshold, wires `eventDidReachThreshold` /`intervalDidEnd` to
-     `useWallet`'s `accrue`), `BrainrotAppPicker.tsx` (the persisted app/category
-     picker), and `DevScreenTime.tsx` (a DevInventory-style throwaway panel -
-     request access, pick apps, start/stop watching - wired into
-     `HomeScreen.tsx` the same way `DevInventory` is, via a new `onAccrue` prop
-     drilled into `SceneStage`). `npx tsc --noEmit` passes clean.
-   - **Not done yet:**
-     - The Family Controls entitlement request itself was submitted 2026-09-27 -
-       but correcting an earlier note here: the actual request form
-       (developer.apple.com/contact/request/family-controls-distribution) has no
-       bundle-ID field at all. It's a single, **team-level** request (name/email/
-       Team ID only), not one per bundle ID as first assumed. Recent Apple-forum
-       reports say this queue runs weeks with no status updates - nothing to do
-       but wait on it.
-     - Once Apple approves it, the capability still needs to be turned on **per
-       App ID**: Certificates, Identifiers & Profiles -> Identifiers -> (each of
-       the 4 App IDs) -> Capabilities tab -> enable "Family Controls" -> Save.
-       Self-service, no extra Apple review. The 4 App IDs
-       (`com.emilskotner.mindscape` and the three `.ActivityMonitorExtension` /
-       `.ShieldAction` / `.ShieldConfiguration` suffixes) don't exist yet in
-       Certificates, Identifiers & Profiles - registering them doesn't need to
-       wait for approval, can be done any time.
-     - `expo prebuild --platform ios` hasn't been run to completion. It needs to
-       run on the actual Mac, not through this bridge - the bridge's Linux VM has
-       no Xcode/CocoaPods anyway (`pod install` was never going to work from
-       there), and independently, Node's own `fs` calls (mkdir/cp) hit the same
-       bridge flakiness repeatedly deep in prebuild while shell equivalents didn't.
-       Run `rm -rf ios && npx expo prebuild --platform ios` locally, then
-       `cd ios && pod install`.
-     - Nothing here has been run on a simulator or device yet - the whole
-       useScreenTime/BrainrotAppPicker/DevScreenTime flow is untested beyond
-       type-checking cleanly. Expect to debug on first real build.
-   - **Developing/testing this does not have to wait for Apple's approval.**
-     That's only needed for App Store/TestFlight distribution. Locally:
-     - **Simulator won't work at all** - FamilyControls/DeviceActivity need a
-       real, physical iPhone signed into iCloud (Simulator has no Screen Time
-       data and the authorization/picker flow doesn't function there).
-     - A **development-signed** build from Xcode (or `expo run:ios --device`)
-       gets the Family Controls capability automatically once it's added to the
-       targets' entitlements - Xcode provisions this itself for local runs, no
-       Apple-side approval needed for that. This is what "development only
-       works via Xcode builds" (noted above, from the library's README) means.
-     - Practical iteration tip: `DAILY_BUDGET_MINUTES` in `useScreenTime.ts` is
-       30 - drop it to 1-2 while testing so `eventDidReachThreshold` actually
-       fires within a test session instead of requiring half an hour of real
-       phone use per iteration. Revert before shipping.
-     - So the real next milestone is: register the 4 App IDs, run
-       prebuild + pod install, plug in a real iPhone, build via Xcode with
-       development signing, and exercise the whole authorize -> pick apps ->
-       start monitoring -> use a shielded app -> see the event fire loop on
-       device. The Apple approval queue runs in parallel, only gating the
-       eventual TestFlight build.
+   **Architecture** (see the architecture table for the full file list):
+   `src/game/engine/engineLogic.ts` is pure - `(state, now, ...) => {state, effects, events}`,
+   zero native calls, fully testable by fabricating a state and a timestamp.
+   `deviceActivityBridge.ts` is the *only* file that calls the library's blocking/scheduling
+   APIs. `EngineProvider.tsx`/`useEngine()` is the one place that runs a pure result's
+   `effects` through the bridge and the wallet, persists state, and runs `reconcile()` at
+   startup and on every `AppState` "active" (rolls the day, settles it via `settleDay()`,
+   expires a finished ticket/emergency, pays out a finished focus, and re-applies the block
+   if the engine should be locked but `isShieldActive()` says it isn't - the fail-open
+   repair). `config.ts` holds every tunable number, normal and "fast test mode" (toggled in
+   the Screen time tab's Developer section - 2 min tickets, 1 min cooldown, etc., for
+   exercising day rollover without waiting real hours).
+
+   **The shield is ONE generic, state-agnostic config** (`deviceActivityBridge.ts`'s
+   `configureShield`) - "Locked by Mindscape" / "Open Mindscape to use a ticket.", not a
+   per-status variant, because the text would go stale while the app (and therefore any
+   ability to update it) is dead. **Confirmed on-device (2026-10-04): the primary button's
+   `{type: "openApp"}` does NOT reopen the app** - it just closes the shield back to the
+   Home Screen. Root cause found by reading `node_modules/react-native-device-activity/
+   ios/Shared.swift`: it calls `openUrl("device-activity://")` (a hardcoded, unrelated URL
+   scheme - "todo: replace with general string" in the library's own source) via a freshly
+   constructed `NSExtensionContext()` that has no relationship to the extension's real host,
+   so `.open()` on it is a no-op. Worked around with a **second action in the same button**:
+   `{type: "sendNotification", ...}` with `userInfo: {route: "/tickets"}` - posted natively
+   by the ShieldAction extension process itself. `expo-notifications` (added 2026-10-04) is
+   JS-side only for (a) `ensureNotificationPermission()` so the native post isn't silently
+   dropped and (b) `registerNotificationTapHandler()` (called once, in `app/_layout.tsx`) to
+   read that `userInfo.route` back and deep-link there. **Not yet verified that the
+   notification actually arrives/deep-links on-device** - openApp's failure was confirmed
+   live; the notification fallback was built in response but still needs its own on-device
+   check (Phase 3).
+
+   **What's confirmed working on a physical iPhone (Phase 0, before any engine rules
+   existed):** requestAuthorization -> pick apps (via the picker - see the "mistake" below)
+   -> `blockSelection` -> native shield appears with our custom title/subtitle/button text
+   and colors -> `unblockSelection` -> apps open normally again. **What's NOT yet verified
+   on-device:** anything built in Phase 1 - a ticket actually unlocking/re-locking on its
+   own schedule with the app killed, cooldown, the emergency valve, day rollover, Focus
+   paying through the real engine, state surviving a restart, the notification fallback.
+   That's Phase 3's job, tracked separately from this file until it's actually run.
+
+   **A real on-device bug already found and fixed:** `BrainrotAppPicker.tsx` originally used
+   the *inline* `DeviceActivitySelectionViewPersisted` (embedded directly in the screen).
+   On a physical iPhone this rendered **completely blank** and silently **swallowed every
+   touch on the whole Screen Time screen** - no crash, no JS error, every other button on
+   that screen (including ones with no relation to it) just stopped responding. Fixed by
+   switching to the native **sheet** presentation (`DeviceActivitySelectionSheetViewPersisted`,
+   opened from a plain "Choose apps" button) - matches the library's own README guidance for
+   a custom-presentation use case, confirmed fixed on-device. If a future screen embeds any
+   `DeviceActivitySelection*View` inline again, watch for this exact failure mode.
+
+   **Apple approval status:** the Family Controls (Distribution) entitlement request was
+   submitted 2026-09-27 (team-level, not per-bundle-ID - see the request form at
+   developer.apple.com/contact/request/family-controls-distribution) and is still pending;
+   this only gates App Store/TestFlight distribution, not local development - every bit of
+   the above works today via development signing (see "Running it"'s device-build notes),
+   which is what's actually been tested. Once approved, Certificates/Identifiers/Profiles
+   needs "Family Controls" capability enabled per App ID (self-service, no extra review) for
+   the 4 App IDs (`com.emilskotner.mindscape` + `.ActivityMonitorExtension`/`.ShieldAction`/
+   `.ShieldConfiguration`).
+
+   **What replaced the old daily-budget design (gone, 2026-10-04):** an earlier pass
+   (`useScreenTime.ts`, deleted) scheduled one all-day monitor with an
+   `eventDidReachThreshold` event at a fixed daily-usage threshold and paid a reward on
+   `intervalDidEnd` if the threshold was never crossed. Replaced entirely by the ticket
+   engine above for the reason stated at the top of this section - threshold events are
+   Apple's unreliable live-usage signal, exactly what rewards must never be based on.
+   `useAuthorization.ts` is what's left of it (just `requestAuthorization`/
+   `useAuthorizationStatus`, nothing time-based).
 4. **Navigation - done (2026-10-03), `feat/tab-bar`.** `expo-router` installed
    (`npx expo install`, so versions match SDK 57); `package.json`'s `main` is now
    `"expo-router/entry"` - `App.tsx` and the old `index.ts` are gone, and the Reanimated
@@ -201,15 +227,11 @@ un-picked when these land.
    - **Mounting**: bottom-tabs keeps a tab's screen mounted (hidden, not unmounted) after its
      first focus - this is *why* switching tabs doesn't reset the Village screen's camera,
      placed items or removed scenery. Don't add `unmountOnBlur`.
-   - **Focus modal** (`app/focus.tsx`): 15/25/45 min, countdown derived from an `endsAt`
-     timestamp (recomputed on an interval *and* on `AppState` returning to `"active"`) rather
-     than a decrementing counter, so it's correct after backgrounding. Completion calls
-     `wallet.accrue`; cancelling doesn't. **Does not shield apps yet** - that's
-     `ManagedSettings`' job (see #3), not wired here; this is a plain timer today.
-   - **Screen time tab** (`src/game/screentime/ScreenTimeScreen.tsx`): what
-     `DevScreenTime.tsx` used to be (that file is gone) - same `useScreenTime` hook and
-     `BrainrotAppPicker`, now a real screen reading `accrue` from `WalletContext` instead of
-     having it drilled through HomeScreen/SceneStage.
+   - **Focus modal** (`app/focus.tsx`) and **Screen time tab**
+     (`src/game/screentime/ScreenTimeScreen.tsx`) both existed as of this tab-bar pass with a
+     plain local timer / daily-budget design - both have since been rewritten to drive the
+     real ticket engine (2026-10-04) - see "Where this is going" #3 for the current design,
+     this bullet is history, not the current shape.
    - **Three things discovered building this, worth not re-deriving** (see "Mistakes" below
      for the full writeup of each): `expo-router` pulls in `react-native-gesture-handler` as
      an unused transitive peer dependency (its own optional Drawer support, not a choice made
@@ -284,6 +306,37 @@ entirely. It's easy to mistake for a bug in the Settings gear button (`SettingsB
 top-right of the Village screen) since they land in roughly the same corner - it is not
 part of the app and will not appear in a production or TestFlight build.
 
+**`npx expo install <pkg>` can fail its own `npm install` step with an ERESOLVE conflict
+unrelated to the package you're adding** - `expo-router`'s own dependency tree (via
+`@expo/ui`/`vaul`/`@radix-ui`, the same cluster already excluded from native autolinking -
+see "Where this is going" #4) has a latent `react-dom` peer mismatch that only surfaces when anything
+forces a fresh resolve. Confirmed harmless to route around: `npm install --legacy-peer-deps`
+(package.json already has the right entry from the failed `expo install`) installs cleanly -
+this is how `expo-notifications` got added. Still run `pod install` afterward as usual.
+
+**A new native dependency (like `expo-notifications`) needs a real device/simulator rebuild
+to actually work, not just `pod install`** - `pod install` only makes Xcode's project aware
+of it; the app binary on your phone is whatever was last built. If something using a
+just-added native module silently does nothing on-device, check whether a rebuild happened
+since it was added before assuming the code is wrong.
+
+**Physical-device installs on this Mac: `npx expo run:ios --device` reliably fails its own
+final install step with `CommandError: InvalidHostID`**, even though the build itself always
+succeeds - confirmed this is specific to how that command's own `child_process.spawn('xcrun',
+...)` call behaves right after its own preceding `xcodebuild` run in the same process (an
+isolated `node -e` script running the exact same `spawn` call back-to-back with no preceding
+build succeeds immediately). The reliable move: let the command build (it will "fail" at the
+end), then run the same install manually -
+`xcrun devicectl device install app --device <udid-or-name> <path-to-.app>` followed by
+`xcrun devicectl device process launch --terminate-existing --device <udid> <bundle-id>` -
+both always succeed. `xcrun devicectl list devices` / `xcrun xctrace list devices` show the
+device's current state if something seems stuck; if the Mac's trust with the phone itself has
+gone stale (install hangs forever at "Connecting to: <device>", not a fast error - a real
+case hit once, 2026-10-04), the fix that worked was, on the phone: **Settings → General →
+Transfer or Reset iPhone → Reset → Reset Location & Privacy** (resets per-app permissions and
+every trusted-computer pairing - does **not** touch installed apps, their data, or anything
+else), then reconnect and approve the new "Trust This Computer" prompt.
+
 Run `npx expo run:ios` only when native code or dependencies change. `npx tsc --noEmit`
 must be green before anything is "done" - there is **no ESLint config and no test runner**,
 so tsc + a screenshot is the whole safety net.
@@ -298,14 +351,16 @@ everything reusable; `src/ui/` holds navigation chrome that isn't the world.
 
 | File | Responsibility |
 |---|---|
-| `_layout.tsx` | Root `<Stack>`: wraps everything in `SafeAreaProvider` + `WalletProvider`, holds the Reanimated logger config (see "Running it" - this is the first file the router loads). Declares `(tabs)` plus `focus`/`settings` as modals. |
+| `_layout.tsx` | Root `<Stack>`: wraps everything in `SafeAreaProvider` + `WalletProvider` + `EngineProvider`, holds the Reanimated logger config (see "Running it" - this is the first file the router loads), and registers the notification tap handler (`engine/notifications.ts`). Declares `(tabs)` plus `focus`/`settings`/`tickets`/`summary` as modals. |
 | `(tabs)/_layout.tsx` | The `<Tabs>` navigator - `tabBar={(props) => <TabBar {...props} />}` replaces the default chrome entirely (see `src/ui/TabBar/`). Screen names here must match `tabs.config.ts`'s `route` values. |
 | `(tabs)/index.tsx` | Re-exports `HomeScreen` (Village) - see below. |
 | `(tabs)/shop.tsx` | Read-only item catalog + balance - see `itemCatalog.ts`. No purchasing yet. |
 | `(tabs)/screentime.tsx` | Re-exports `ScreenTimeScreen` (`src/game/screentime/`) - see "Where this is going" #3. |
 | `(tabs)/profile.tsx` | Placeholder; the one real thing on it is the disabled "Friends - coming soon" row. |
-| `focus.tsx` | The Focus session modal - duration picker, `endsAt`-timestamp countdown, `wallet.accrue` on completion. See "Where this is going" #4 for the backgrounding-safety reasoning. |
+| `focus.tsx` | The Focus session modal - drives `useEngine()`'s `activeFocus`/`startFocus`/`giveUpFocus` directly (not a local timer - see "Where this is going" #3). Two-tap "Give up" (pays nothing), natural completion calls `forceReconcile()` itself since reconcile doesn't otherwise run just from a countdown reaching zero in the foreground. |
 | `settings.tsx` | Placeholder modal, opened from the Village screen's gear button. |
+| `tickets.tsx` | Deep link `mindscape://tickets` (and where the shield's fallback notification sends you). Three ticket pips, `HoldToConfirm` to start one, status/countdown, the emergency-valve section when `useEngine().emergencyEligible`. |
+| `summary.tsx` | Pushed automatically by `EngineProvider` the moment a day-settlement pays something (`state.pendingSummary`) - "Yesterday: unused tickets +10, clean day +10, ...". `dismissSummary()` on close, which is also what stops it being pushed again for that same settlement. |
 
 ### Navigation chrome (`src/ui/`)
 
@@ -315,6 +370,9 @@ everything reusable; `src/ui/` holds navigation chrome that isn't the world.
 | `TabBar/theme.ts` | Every color/radius/size/label constant the tab bar (and Focus/Shop/Screen time/Profile/Settings) draws from. |
 | `TabBar/TabBar.tsx` | The custom `tabBar`. Crossfades two stacked Feather icons (grey/white) rather than animating the glyph's own `color` prop - robust regardless of how `@expo/vector-icons` merges an animated style internally. The center Focus button is a flex spacer with an absolutely-positioned circle poking up out of it (`playButtonLift`), so it keeps the bar's 5 equal slots while floating above the bar's top edge. |
 | `SettingsButton.tsx` | The Village screen's gear button → `/settings`. Gated on `useIsFocused()` in HomeScreen.tsx - bottom-tabs' hiding of an unfocused screen didn't fully clip this `Pressable`'s native view without it (plain `View`s like `CurrencyHud` weren't affected). |
+| `HoldToConfirm.tsx` | The press-and-hold confirm button (ticket start, emergency valve). Progress indicator is a plain bottom-up-filling `View` clipped by a rounded parent, not an SVG ring - no `react-native-svg` dependency (would mean another native rebuild, and the phone was away for testing when this was built) - swap for a true ring later, purely visual, without touching the hold logic. |
+| `formatDuration.ts` | `formatMMSS(ms)` - every countdown in the app (tickets, Focus, the Screen time dashboard) formats the same way. |
+| `useCountdown.ts` | `useCountdown(endsAt)` - live ms-remaining, ticking once a second, `null` when there's nothing to count down to. Used anywhere a timestamp needs to become a live display. |
 
 ### The world view (`src/screens/HomeScreen/`)
 
@@ -345,8 +403,22 @@ everything reusable; `src/ui/` holds navigation chrome that isn't the world.
 | `village/SceneryGroupVisual.tsx` | One `SceneryGroup`'s draw node - its tiles (batched, like a band) plus a selection outline. |
 | `village/SceneryRemovalPrompt.tsx` | The floating "remove for N" button over a selected group - a real `Pressable`, not a Skia draw; tracks the camera via `useAnimatedStyle`. |
 | `Village.tsx` | `useVillageImages` - the hand-written `require()` list for the village's tilesets. **Keep in sync with `VILLAGE_TILESETS`** (see the file's own comment). |
-| `economy/useWallet.ts` | `useWallet()`: `balance`, `accrue(amount, source)`, `spend(amount)` - source-agnostic, not yet persisted. See "Where this is going" #2. |
-| `economy/CurrencyHud.tsx` | The top-right balance badge - presentational only, `HomeScreen.tsx` owns the wallet and passes the number down. |
+| `economy/useWallet.ts` | `useWallet()`: `balance`, `accrue(amount, source)`, `spend(amount, source?)`, `ledger` (last 100 `{t, amount, source}`) - source-agnostic. See "Where this is going" #2. |
+| `economy/WalletContext.tsx` | `WalletProvider`/`useWalletContext()` - lifts the wallet above the navigator (survives a tab switch) and persists it (`engine/storage.ts`), hydrated synchronously before first render. |
+| `economy/economyConfig.ts` | Every coin amount (`ECONOMY`) and the Shop's prices (`SHOP_PRICES`) - the one place to tune the economy. |
+| `economy/settleDay.ts` | `settleDay()` - pure, no wallet/storage access: one day's engine summary in, `{totalCoins, newStreak, breakdown}` out. Called from `engineLogic.ts`'s `reconcile()`. |
+| `economy/CurrencyHud.tsx` | The balance badge - presentational only, sits in `HomeScreen.tsx`'s `topRightRow` next to `engine/TicketChip.tsx`, not positioned itself. |
+| `engine/types.ts` | `EngineState`/`EngineStatus`/`EngineEffect`/`EngineResult` - **read this first** for the ticket engine, same role `scene.ts` plays for the world. |
+| `engine/config.ts` | Every engine constant, normal + "fast test mode" (`configFor(fastMode)`), plus `BRAINROT_SELECTION_ID` and the reblock-schedule constants. |
+| `engine/storage.ts` | `getJSON`/`setJSON` over the library's `userDefaultsSet/Get` - what `WalletContext`, `EngineProvider` and `HomeScreen.tsx`'s removed-scenery state all persist through. |
+| `engine/engineLogic.ts` | The whole ticket engine's rules as pure functions (`arm`, `disarm`, `startTicket`, `endTicketEarly`, `startEmergency`, `startFocus`, `giveUpFocus`, `reconcile`) - **no native calls, no storage** - see "Where this is going" #3. `dayKeyFor()` is the 04:00-rollover day-key function. |
+| `engine/deviceActivityBridge.ts` | The *only* file that calls the library's blocking/scheduling/shield APIs (`blockAll`, `unblockAll`, `scheduleReblock`, `cancelReblock`, `configureShield`, `isShieldActive`) - everything else goes through `EngineEffect`s. |
+| `engine/EngineProvider.tsx` | `EngineProvider`/`useEngine()` - runs a pure result's effects through the bridge + wallet, persists state, runs `reconcile()` at startup/on `AppState` "active", exposes the Developer-section dev tools (`forceReconcile`, `resetDay`, `unblockEverything`, `setFastMode`) and `dismissSummary()`. |
+| `engine/notifications.ts` | The shield's `openApp`-doesn't-work fallback: `ensureNotificationPermission()` and `registerNotificationTapHandler()` (reads the notification's `userInfo.route`, deep-links there). Registered once, in `app/_layout.tsx`. |
+| `engine/TicketChip.tsx` | Sits next to `CurrencyHud` on the Village screen - "N left", a live countdown during a ticket/cooldown/emergency, or nothing before setup. Tap → `/tickets`. |
+| `screentime/useAuthorization.ts` | Just `requestAuthorization`/`useAuthorizationStatus`/`isAvailable` - what's left after the old threshold-based `useScreenTime.ts` was deleted (see "Where this is going" #3). |
+| `screentime/BrainrotAppPicker.tsx` | The native **sheet** app picker (`DeviceActivitySelectionSheetViewPersisted`, opened from a "Choose apps" button) - not the inline view, which was found to render blank and swallow every touch on-device. See "Where this is going" #3. |
+| `screentime/ScreenTimeScreen.tsx` | The Screen time tab: setup flow (authorize → pick apps → Activate) when `!engine.state.armed`, else the dashboard (status, ticket pips, countdown, streak, "End ticket now", Disarm) plus the always-visible Developer section (fast mode, force reconcile, reset day, unblock-everything safety hatch, last-20 events, wallet ledger). |
 | `items/itemCatalog.ts` | Every placeable item as data (size, footprint, layer, animation, `unlocked`). The shop and unlocking are meant to reuse this table unchanged. |
 | `items/useWorldItems.ts` | Placed items: state, mutations, collision rects, `isValidPlacement` / `overlapsOtherItem` / `findFreeSpot`, baseline-priority `itemAt` hit-testing, `serialize`/`restore` (unwired). |
 | `items/ItemLayer.tsx` | `ItemLayer` (the always-under / always-over passes), `ItemVisual` (one item, animated/static switch, used by the depth-sorted pass), `PlacedItemSprite` (with the behind/front toggle). |

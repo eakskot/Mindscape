@@ -158,15 +158,31 @@ un-picked when these land.
    ios/Shared.swift`: it calls `openUrl("device-activity://")` (a hardcoded, unrelated URL
    scheme - "todo: replace with general string" in the library's own source) via a freshly
    constructed `NSExtensionContext()` that has no relationship to the extension's real host,
-   so `.open()` on it is a no-op. Worked around with a **second action in the same button**:
-   `{type: "sendNotification", ...}` with `userInfo: {route: "/tickets"}` - posted natively
-   by the ShieldAction extension process itself. `expo-notifications` (added 2026-10-04) is
-   JS-side only for (a) `ensureNotificationPermission()` so the native post isn't silently
-   dropped and (b) `registerNotificationTapHandler()` (called once, in `app/_layout.tsx`) to
-   read that `userInfo.route` back and deep-link there. **Not yet verified that the
-   notification actually arrives/deep-links on-device** - openApp's failure was confirmed
-   live; the notification fallback was built in response but still needs its own on-device
-   check (Phase 3).
+   so `.open()` on it is a no-op. **Still unsolved - "Open Mindscape" is cosmetic; the real
+   way back in is opening the app from the Home Screen.** A workaround was built and then
+   **reverted (2026-10-04)**: a second `{type: "sendNotification", ...}` action on the same
+   button (`userInfo: {route: "/tickets"}`, posted natively by the ShieldAction extension),
+   with `expo-notifications` JS-side asking permission and deep-linking on tap
+   (`engine/notifications.ts`, now deleted). Adding `expo-notifications` broke the native
+   build with `ld: ... cannot link directly with 'SwiftUICore' because product being built
+   is not an allowed client of it` - confirmed not from its own Swift source (no SwiftUI
+   import anywhere in `node_modules/expo-notifications`), not root-caused further. See the
+   TODO in `configureShield`. Root-cause that link error before re-adding the package.
+
+   **Two on-device engine bugs found and fixed (2026-10-05):**
+   - **Every cold start disarmed the engine.** Right after launch,
+     `getAuthorizationStatus()` can briefly read `notDetermined` even when the user approved
+     long ago (the library's README calls out this native delay). `reconcile()`'s
+     disarm-on-revoke check treated that as revoked. `EngineProvider.tsx` now passes
+     `isAuthorized = status !== denied` - only an explicit `denied` disarms. Don't
+     "tighten" this back to `=== approved`.
+   - **Status froze at 0:00 when a ticket/cooldown ran out in the foreground.**
+     `engine.status` only recomputes when `reconcile()` runs (startup, `AppState` "active",
+     an action) - a countdown reaching zero triggers none of those. `TicketChip.tsx`
+     (always mounted, since bottom-tabs keeps the Village screen alive) and `tickets.tsx`
+     both call `forceReconcile()` once per window end, guarded by a ref so it fires once.
+     `focus.tsx` already did the same for Focus. Any new screen that shows an engine
+     countdown and reads `status` needs this too, or relies on the chip doing it.
 
    **What's confirmed working on a physical iPhone (Phase 0, before any engine rules
    existed):** requestAuthorization -> pick apps (via the picker - see the "mistake" below)
@@ -174,7 +190,7 @@ un-picked when these land.
    and colors -> `unblockSelection` -> apps open normally again. **What's NOT yet verified
    on-device:** anything built in Phase 1 - a ticket actually unlocking/re-locking on its
    own schedule with the app killed, cooldown, the emergency valve, day rollover, Focus
-   paying through the real engine, state surviving a restart, the notification fallback.
+   paying through the real engine, state surviving a restart.
    That's Phase 3's job, tracked separately from this file until it's actually run.
 
    **A real on-device bug already found and fixed:** `BrainrotAppPicker.tsx` originally used
@@ -248,7 +264,8 @@ un-picked when these land.
 Versions are in `package.json` (Expo SDK 57, RN 0.86, Reanimated 4, Skia 2.6). Deliberately
 **no state library**, **no test runner** - don't add one without deciding to migrate.
 `expo-router` (see "Where this is going" #4) is the one navigator. `react-native-gesture-
-handler` is present as a native pod - `expo-router` lists it as a peer dependency for its own
+handler` is in `package.json` (a direct dependency since the 2026-10-04 reinstall that
+removed `expo-notifications`) - `expo-router` lists it as a peer dependency for its own
 optional Drawer navigator, which this app doesn't use - but **no app code imports it and
 nothing wraps the app in `GestureHandlerRootView`**: all world input is still one
 `PanResponder` (`useSceneGestures.ts`), untouched by its presence. `/ios` and `/android` are
@@ -312,9 +329,10 @@ unrelated to the package you're adding** - `expo-router`'s own dependency tree (
 see "Where this is going" #4) has a latent `react-dom` peer mismatch that only surfaces when anything
 forces a fresh resolve. Confirmed harmless to route around: `npm install --legacy-peer-deps`
 (package.json already has the right entry from the failed `expo install`) installs cleanly -
-this is how `expo-notifications` got added. Still run `pod install` afterward as usual.
+this is how `expo-notifications` got added (and later removed again - see "Where this is
+going" #3). Still run `pod install` afterward as usual.
 
-**A new native dependency (like `expo-notifications`) needs a real device/simulator rebuild
+**A new native dependency needs a real device/simulator rebuild
 to actually work, not just `pod install`** - `pod install` only makes Xcode's project aware
 of it; the app binary on your phone is whatever was last built. If something using a
 just-added native module silently does nothing on-device, check whether a rebuild happened
@@ -351,7 +369,7 @@ everything reusable; `src/ui/` holds navigation chrome that isn't the world.
 
 | File | Responsibility |
 |---|---|
-| `_layout.tsx` | Root `<Stack>`: wraps everything in `SafeAreaProvider` + `WalletProvider` + `EngineProvider`, holds the Reanimated logger config (see "Running it" - this is the first file the router loads), and registers the notification tap handler (`engine/notifications.ts`). Declares `(tabs)` plus `focus`/`settings`/`tickets`/`summary` as modals. |
+| `_layout.tsx` | Root `<Stack>`: wraps everything in `SafeAreaProvider` + `WalletProvider` + `EngineProvider`, holds the Reanimated logger config (see "Running it" - this is the first file the router loads). Declares `(tabs)` plus `focus`/`settings`/`tickets`/`summary` as modals. |
 | `(tabs)/_layout.tsx` | The `<Tabs>` navigator - `tabBar={(props) => <TabBar {...props} />}` replaces the default chrome entirely (see `src/ui/TabBar/`). Screen names here must match `tabs.config.ts`'s `route` values. |
 | `(tabs)/index.tsx` | Re-exports `HomeScreen` (Village) - see below. |
 | `(tabs)/shop.tsx` | Read-only item catalog + balance - see `itemCatalog.ts`. No purchasing yet. |
@@ -359,7 +377,7 @@ everything reusable; `src/ui/` holds navigation chrome that isn't the world.
 | `(tabs)/profile.tsx` | Placeholder; the one real thing on it is the disabled "Friends - coming soon" row. |
 | `focus.tsx` | The Focus session modal - drives `useEngine()`'s `activeFocus`/`startFocus`/`giveUpFocus` directly (not a local timer - see "Where this is going" #3). Two-tap "Give up" (pays nothing), natural completion calls `forceReconcile()` itself since reconcile doesn't otherwise run just from a countdown reaching zero in the foreground. |
 | `settings.tsx` | Placeholder modal, opened from the Village screen's gear button. |
-| `tickets.tsx` | Deep link `mindscape://tickets` (and where the shield's fallback notification sends you). Three ticket pips, `HoldToConfirm` to start one, status/countdown, the emergency-valve section when `useEngine().emergencyEligible`. |
+| `tickets.tsx` | Deep link `mindscape://tickets`. Three ticket pips, `HoldToConfirm` to start one, status/countdown, the emergency-valve section when `useEngine().emergencyEligible`. Calls `forceReconcile()` when its countdown hits zero (see "Where this is going" #3). |
 | `summary.tsx` | Pushed automatically by `EngineProvider` the moment a day-settlement pays something (`state.pendingSummary`) - "Yesterday: unused tickets +10, clean day +10, ...". `dismissSummary()` on close, which is also what stops it being pushed again for that same settlement. |
 
 ### Navigation chrome (`src/ui/`)
@@ -414,8 +432,7 @@ everything reusable; `src/ui/` holds navigation chrome that isn't the world.
 | `engine/engineLogic.ts` | The whole ticket engine's rules as pure functions (`arm`, `disarm`, `startTicket`, `endTicketEarly`, `startEmergency`, `startFocus`, `giveUpFocus`, `reconcile`) - **no native calls, no storage** - see "Where this is going" #3. `dayKeyFor()` is the 04:00-rollover day-key function. |
 | `engine/deviceActivityBridge.ts` | The *only* file that calls the library's blocking/scheduling/shield APIs (`blockAll`, `unblockAll`, `scheduleReblock`, `cancelReblock`, `configureShield`, `isShieldActive`) - everything else goes through `EngineEffect`s. |
 | `engine/EngineProvider.tsx` | `EngineProvider`/`useEngine()` - runs a pure result's effects through the bridge + wallet, persists state, runs `reconcile()` at startup/on `AppState` "active", exposes the Developer-section dev tools (`forceReconcile`, `resetDay`, `unblockEverything`, `setFastMode`) and `dismissSummary()`. |
-| `engine/notifications.ts` | The shield's `openApp`-doesn't-work fallback: `ensureNotificationPermission()` and `registerNotificationTapHandler()` (reads the notification's `userInfo.route`, deep-links there). Registered once, in `app/_layout.tsx`. |
-| `engine/TicketChip.tsx` | Sits next to `CurrencyHud` on the Village screen - "N left", a live countdown during a ticket/cooldown/emergency, or nothing before setup. Tap → `/tickets`. |
+| `engine/TicketChip.tsx` | Sits next to `CurrencyHud` on the Village screen - "N left", a live countdown during a ticket/cooldown/emergency, or nothing before setup. Tap → `/tickets`. Also the app's always-mounted "countdown hit zero → `forceReconcile()`" watcher. |
 | `screentime/useAuthorization.ts` | Just `requestAuthorization`/`useAuthorizationStatus`/`isAvailable` - what's left after the old threshold-based `useScreenTime.ts` was deleted (see "Where this is going" #3). |
 | `screentime/BrainrotAppPicker.tsx` | The native **sheet** app picker (`DeviceActivitySelectionSheetViewPersisted`, opened from a "Choose apps" button) - not the inline view, which was found to render blank and swallow every touch on-device. See "Where this is going" #3. |
 | `screentime/ScreenTimeScreen.tsx` | The Screen time tab: setup flow (authorize → pick apps → Activate) when `!engine.state.armed`, else the dashboard (status, ticket pips, countdown, streak, "End ticket now", Disarm) plus the always-visible Developer section (fast mode, force reconcile, reset day, unblock-everything safety hatch, last-20 events, wallet ledger). |

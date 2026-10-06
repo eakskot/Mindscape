@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { useEffect, useRef } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -24,6 +25,23 @@ export default function TicketsScreen() {
     state.activeTicket?.endsAt ?? state.emergencyActive?.endsAt ?? null;
   const activeRemaining = useCountdown(activeEndsAt);
   const cooldownRemaining = useCountdown(state.cooldownUntil);
+
+  // `engine.status` only recomputes when engine state actually changes
+  // (an action, or reconcile() running on startup/AppState "active") - a
+  // countdown reaching zero while this screen just sits open in the
+  // foreground doesn't itself trigger either, so without this the status
+  // text/pips go stale at "0:00" until something else happens to trigger a
+  // reconcile (confirmed on-device 2026-10-05). Same fix as focus.tsx's
+  // natural-completion handling, applied here for ticket/cooldown windows.
+  const reconciledForRef = useRef<number | null>(null);
+  useEffect(() => {
+    const endsAt = activeEndsAt ?? state.cooldownUntil;
+    const remaining = activeEndsAt !== null ? activeRemaining : cooldownRemaining;
+    if (endsAt !== null && remaining === 0 && reconciledForRef.current !== endsAt) {
+      reconciledForRef.current = endsAt;
+      engine.forceReconcile();
+    }
+  }, [activeRemaining, cooldownRemaining, activeEndsAt, state.cooldownUntil, engine]);
 
   const lastTicketEndedAt = state.ticketsUsedToday.reduce<number | null>(
     (latest, t) => (t.endedAt !== null && t.endedAt > (latest ?? 0) ? t.endedAt : latest),

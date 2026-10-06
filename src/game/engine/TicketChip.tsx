@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { useEffect, useRef } from "react";
 import { Pressable, StyleSheet, Text } from "react-native";
 
 import { formatMMSS } from "../../ui/formatDuration";
@@ -13,6 +14,16 @@ import { useEngine } from "./EngineProvider";
  * running, or nothing at all before the engine's ever been set up (there's
  * nothing useful to show yet - the Screen time tab's setup flow is the
  * entry point, not this chip). Tap -> /tickets.
+ *
+ * Doubles as the app's one always-mounted "did a countdown just hit zero"
+ * watcher: bottom-tabs keeps the Village screen (and this chip) mounted
+ * regardless of which tab is active, so it's the most reliable place to
+ * trigger `forceReconcile()` the moment a ticket/cooldown window ends -
+ * `engine.status` otherwise only updates when *something* calls reconcile,
+ * and a countdown reaching zero while just sitting on screen doesn't do
+ * that by itself (confirmed on-device 2026-10-05 - see tickets.tsx for the
+ * same fix, which this duplicates on purpose for coverage when the Tickets
+ * modal isn't the thing currently open).
  */
 export function TicketChip() {
   const engine = useEngine();
@@ -21,6 +32,14 @@ export function TicketChip() {
   const countdownTarget =
     state.activeTicket?.endsAt ?? state.emergencyActive?.endsAt ?? state.cooldownUntil ?? null;
   const remaining = useCountdown(countdownTarget);
+
+  const reconciledForRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (countdownTarget !== null && remaining === 0 && reconciledForRef.current !== countdownTarget) {
+      reconciledForRef.current = countdownTarget;
+      engine.forceReconcile();
+    }
+  }, [countdownTarget, remaining, engine]);
 
   if (status === "notSetUp") return null;
 

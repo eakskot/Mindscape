@@ -122,7 +122,15 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     setState((current) => {
       const result = pureReconcile(current, Date.now(), {
         isShieldActive: bridge.isShieldActive(),
-        isAuthorized: getAuthorizationStatus() === AuthorizationStatus.approved,
+        // Not `=== approved` - confirmed on-device (2026-10-05) that right
+        // after a cold start, getAuthorizationStatus() can briefly read
+        // `notDetermined` even though the user approved it ages ago (the
+        // library's own README calls this out as a known native delay).
+        // reconcile()'s disarm-on-revoke check must only fire on an
+        // explicit `denied`, never on "don't know yet" - treating
+        // notDetermined as "not approved" was spuriously disarming the
+        // engine on every cold start. See CLAUDE.md.
+        isAuthorized: getAuthorizationStatus() !== AuthorizationStatus.denied,
       });
       runEffects(result.effects);
       if (result.events.length > 0) {

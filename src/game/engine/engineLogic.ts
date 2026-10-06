@@ -286,6 +286,17 @@ function completeFocus(state: EngineState, focusEndsAt: number): EngineResult {
 
 export type ReconcileInputs = {
   isShieldActive: boolean;
+  /**
+   * Whether Family Controls authorization is still good enough to keep the
+   * engine armed. NOT simply "status === approved" - the caller
+   * (EngineProvider.tsx) deliberately computes this as "not explicitly
+   * denied", because `getAuthorizationStatus()` can briefly read
+   * `notDetermined` right after a cold start even when the user approved it
+   * long ago (confirmed on-device 2026-10-05 - a real, reproducible bug
+   * here before that fix: every force-quit + relaunch silently disarmed the
+   * engine). Treat `notDetermined` as "still fine" - only an explicit
+   * `denied` should disarm.
+   */
   isAuthorized: boolean;
 };
 

@@ -10,11 +10,10 @@ import { useCountdown } from "../src/ui/useCountdown";
 import { formatMMSS } from "../src/ui/formatDuration";
 
 /**
- * Deep link `mindscape://tickets` - also where the shield's fallback
- * notification sends you (see engine/notifications.ts). Three ticket
- * cards, a hold-to-confirm start button, and the emergency valve when it's
- * actually eligible (see engineLogic.ts's `emergencyEligible` - cooldown or
- * out of tickets only, never during a ticket or focus).
+ * Deep link `mindscape://tickets`. Three ticket cards, a hold-to-confirm
+ * start button, and the emergency valve when it's actually eligible (see
+ * engineLogic.ts's `emergencyEligible` - cooldown or out of tickets only,
+ * never during a ticket or focus).
  */
 export default function TicketsScreen() {
   const insets = useSafeAreaInsets();

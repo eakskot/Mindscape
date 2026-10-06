@@ -120,10 +120,17 @@ export function cancelReblock(): void {
  * functional on-device (2026-10-04 - see CLAUDE.md): it closes the shield
  * but never reopens Mindscape (the library's own implementation opens a
  * hardcoded, unrelated URL scheme via a disconnected `NSExtensionContext`).
- * Kept in the action list anyway (harmless, and might start working in a
- * future library version) alongside the real mechanism: a local
- * notification whose tap is handled in app/_layout.tsx to deep-link to
- * /tickets - see src/game/engine/notifications.ts.
+ *
+ * TODO(shield fallback): the planned fix was a second `sendNotification`
+ * action on the same button, tap handled via `expo-notifications` to
+ * deep-link to /tickets. Built once (`notifications.ts`, since deleted) but
+ * reverted 2026-10-04: adding `expo-notifications` broke the native build
+ * with `ld: ... cannot link directly with 'SwiftUICore' because product
+ * being built is not an allowed client of it` - confirmed not caused by its
+ * own Swift source (no SwiftUI import anywhere in
+ * node_modules/expo-notifications), not yet root-caused further. Until
+ * this is solved, "Open Mindscape" is cosmetic - the real way back in is
+ * manually opening the app from the Home Screen.
  */
 export function configureShield(): void {
   ReactNativeDeviceActivity.updateShield(
@@ -142,20 +149,7 @@ export function configureShield(): void {
     {
       primary: {
         behavior: "close",
-        actions: [
-          { type: "openApp" },
-          {
-            type: "sendNotification",
-            payload: {
-              title: "Mindscape",
-              body: "Tap to open a ticket.",
-              identifier: "mindscape-open-tickets",
-              // Read back in notifications.ts's response listener to
-              // deep-link to /tickets - see that file's doc comment.
-              userInfo: { route: "/tickets" },
-            },
-          },
-        ],
+        actions: [{ type: "openApp" }],
       },
       secondary: { behavior: "close" },
     },

@@ -1,15 +1,10 @@
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect } from "react";
 import { configureReanimatedLogger, ReanimatedLogLevel } from "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { WalletProvider } from "../src/game/economy/WalletContext";
 import { EngineProvider } from "../src/game/engine/EngineProvider";
-import {
-  ensureNotificationPermission,
-  registerNotificationTapHandler,
-} from "../src/game/engine/notifications";
 
 // Reanimated's "strict mode" logger (default on since Reanimated 3.16) warns
 // on any `.value` read outside a worklet/useDerivedValue/event-handler - a
@@ -46,11 +41,6 @@ configureReanimatedLogger({ level: ReanimatedLogLevel.warn, strict: false });
  * to exist first) - see EngineProvider.tsx.
  */
 export default function RootLayout() {
-  useEffect(() => {
-    void ensureNotificationPermission();
-    return registerNotificationTapHandler();
-  }, []);
-
   return (
     <SafeAreaProvider>
       <WalletProvider>

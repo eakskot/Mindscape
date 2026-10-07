@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -103,6 +104,19 @@ function Dashboard() {
     state.cooldownUntil ??
     null;
   const remaining = useCountdown(countdownTarget);
+
+  // Same staleness fix as TicketChip.tsx/tickets.tsx: `status` only
+  // recomputes when reconcile() runs, which a countdown reaching zero while
+  // this screen sits open doesn't trigger by itself (confirmed on-device
+  // 2026-10-07 - the Focus readout stuck at 0:00 here specifically, since
+  // this screen didn't have the fix the other two already had).
+  const reconciledForRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (countdownTarget !== null && remaining === 0 && reconciledForRef.current !== countdownTarget) {
+      reconciledForRef.current = countdownTarget;
+      engine.forceReconcile();
+    }
+  }, [countdownTarget, remaining, engine]);
 
   return (
     <View style={styles.section}>

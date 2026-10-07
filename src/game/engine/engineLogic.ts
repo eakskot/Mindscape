@@ -257,8 +257,15 @@ function completeFocus(state: EngineState, focusEndsAt: number): EngineResult {
   if (amount > 0) {
     effects.push({ type: "walletAccrue", amount, source: "focus" });
     events.push(`focus completed - +${amount} coins`);
-  } else {
+  } else if (state.focusMinutesRewardedToday >= ECONOMY.FOCUS_MAX_REWARDED_MIN) {
     events.push("focus completed - daily focus cap reached, no reward");
+  } else {
+    // Not the cap - `floor(minutes * FOCUS_COIN_PER_MIN)` just rounded down
+    // to 0 (e.g. fast mode's 1-minute option: floor(1 * 0.5) = 0). Normal
+    // mode's shortest option (15 min) never hits this - only matters for
+    // fast-mode testing. Confirmed on-device 2026-10-07 after this read as
+    // a false "cap reached" for a fresh day's very first session.
+    events.push("focus completed - too short to earn a coin, no reward");
   }
 
   let firstFocusBonusPaid = state.firstFocusBonusPaid;

@@ -54,10 +54,15 @@ ways. What's in:
   for 20 min each (60 min cooldown between), a once-daily emergency valve, and Focus sessions
   that pay coins. See "Where this is going" #3 for the full writeup - `src/game/engine/` is
   the core (pure rules in `engineLogic.ts`, native calls only in `deviceActivityBridge.ts`,
-  both wired together by `EngineProvider.tsx`/`useEngine()`). **Verified Phase 0-only so far**
-  (the raw block/unblock/shield mechanism works on a physical iPhone - see Phase 0's commit);
-  the actual ticket/cooldown/day-rollover rules built on top in Phase 1 have **not yet been
-  exercised on-device** (Phase 3) - say so plainly if asked, don't imply otherwise.
+  both wired together by `EngineProvider.tsx`/`useEngine()`). **Verified on a physical iPhone
+  through Phase 3 (2026-10-04 through 2026-10-07)**: ticket unlock/native re-lock (app
+  killed), cooldown, the emergency valve, Focus paying out (and giving up paying nothing),
+  a real overnight day rollover, state surviving a force-quit, and Low Power Mode. Three
+  real bugs were found and fixed along the way - see "Where this is going" #3. **Still open:
+  Phase 4 (Shop purchasing, not started), whether a notification from a shielded app
+  surfaces during an active Focus session (not yet observed), and the shield's
+  "Open Mindscape" button not actually reopening the app (known, see #3) - say so plainly
+  if asked, don't imply otherwise.**
 - **Persistence** (landed 2026-10-04, alongside the engine): the wallet (+ last-100
   transaction ledger), the ticket engine's whole state, and the removed-scenery set now
   survive an app restart - see `engine/storage.ts` (a thin JSON-over-`userDefaultsSet/Get`
@@ -100,7 +105,7 @@ un-picked when these land.
    "unlocked" - see `unlockedItems()`) - shop prices are already defined in
    `economyConfig.ts`'s `SHOP_PRICES`, purchasing itself isn't wired yet.
 3. **Screen Time / Family Controls - the ticket engine, built 2026-10-04 (`feat/ticket-engine`),
-   verified on-device only through Phase 0 so far.** Ties rewards to real reduced phone use.
+   verified on-device through Phase 3 (2026-10-07).** Ties rewards to real reduced phone use.
    The rules (decided, don't redesign without asking): 1-3 "brainrot" apps are locked all the
    time once armed; a day has 3 tickets of 20 min that unlock everything, 60 min cooldown
    between; a day runs 04:00->04:00, not midnight->midnight; a once-daily emergency valve
@@ -165,33 +170,72 @@ un-picked when these land.
    with `expo-notifications` JS-side asking permission and deep-linking on tap
    (`engine/notifications.ts`, now deleted). Adding `expo-notifications` broke the native
    build with `ld: ... cannot link directly with 'SwiftUICore' because product being built
-   is not an allowed client of it` - confirmed not from its own Swift source (no SwiftUI
-   import anywhere in `node_modules/expo-notifications`), not root-caused further. See the
-   TODO in `configureShield`. Root-cause that link error before re-adding the package.
+   is not an allowed client of it` - at the time this was dead-ended as "not from its own
+   Swift source, not root-caused further," and the package was reverted. **It has since
+   been root-caused for real** (chasing the React-Core-prebuilt bug below, 2026-10-05/06):
+   the actual missing symbols were React dev-support/Fabric C++ classes
+   (`RCTPackagerConnection`, `Sealable::Sealable()`), not anything in expo-notifications -
+   "SwiftUICore" was only a warning line Expo's CLI surfaced prominently, not the real
+   blocker. Fixed generally by the `ios.buildReactNativeFromSource` override below, which
+   means expo-notifications is very likely safe to re-add now. **Not yet retried** - see
+   the TODO in `configureShield` (planned next, 2026-10-08).
 
-   **Two on-device engine bugs found and fixed (2026-10-05):**
+   **Three on-device engine bugs found and fixed (2026-10-05 through 2026-10-07):**
    - **Every cold start disarmed the engine.** Right after launch,
      `getAuthorizationStatus()` can briefly read `notDetermined` even when the user approved
      long ago (the library's README calls out this native delay). `reconcile()`'s
      disarm-on-revoke check treated that as revoked. `EngineProvider.tsx` now passes
      `isAuthorized = status !== denied` - only an explicit `denied` disarms. Don't
      "tighten" this back to `=== approved`.
-   - **Status froze at 0:00 when a ticket/cooldown ran out in the foreground.**
-     `engine.status` only recomputes when `reconcile()` runs (startup, `AppState` "active",
-     an action) - a countdown reaching zero triggers none of those. `TicketChip.tsx`
-     (always mounted, since bottom-tabs keeps the Village screen alive) and `tickets.tsx`
-     both call `forceReconcile()` once per window end, guarded by a ref so it fires once.
-     `focus.tsx` already did the same for Focus. Any new screen that shows an engine
-     countdown and reads `status` needs this too, or relies on the chip doing it.
+   - **Status froze at 0:00 when a ticket/cooldown/Focus session ran out in the
+     foreground.** `engine.status` only recomputes when `reconcile()` runs (startup,
+     `AppState` "active", an action) - a countdown reaching zero triggers none of those.
+     Fixed in three places, each guarded by a ref so it fires once per window:
+     `TicketChip.tsx` (always mounted, since bottom-tabs keeps the Village screen alive),
+     `tickets.tsx`, and `ScreenTimeScreen.tsx`'s `Dashboard` (found a day later than the
+     other two - its own Focus countdown had the same gap). `focus.tsx` already did the
+     same. Any new screen that shows an engine countdown and reads `status` needs this too.
+   - **A completed Focus session could misreport "daily focus cap reached" when the real
+     cause was just rounding.** `completeFocus()`'s reward is
+     `floor(minutes * FOCUS_COIN_PER_MIN)` (0.5/min) - fast mode's shortest option (1 min)
+     always floors to 0 coins, nothing to do with the 60 min/day cap (normal mode's
+     shortest option, 15 min, never hits this). The event message assumed any zero-reward
+     completion meant the cap; it now checks `focusMinutesRewardedToday >=
+     FOCUS_MAX_REWARDED_MIN` and says "too short to earn a coin" otherwise.
 
-   **What's confirmed working on a physical iPhone (Phase 0, before any engine rules
-   existed):** requestAuthorization -> pick apps (via the picker - see the "mistake" below)
-   -> `blockSelection` -> native shield appears with our custom title/subtitle/button text
-   and colors -> `unblockSelection` -> apps open normally again. **What's NOT yet verified
-   on-device:** anything built in Phase 1 - a ticket actually unlocking/re-locking on its
-   own schedule with the app killed, cooldown, the emergency valve, day rollover, Focus
-   paying through the real engine, state surviving a restart.
-   That's Phase 3's job, tracked separately from this file until it's actually run.
+   **One on-device issue found, not yet fixed (2026-10-06):** the world view (zoom/pan)
+   gets laggy specifically after backgrounding the app and returning to it - confirmed by
+   the user, and confirmed *not* the known Fast-Refresh-orphaned-Reanimated-mapper issue
+   (mistake #3) since it reproduces on a genuine background/foreground cycle, not Fast
+   Refresh. Leading hypothesis, not yet verified: `EngineProvider.tsx`'s `AppState`
+   "active" listener runs `reconcile()` on every return to foreground, which makes two
+   synchronous native calls (`isShieldActive()`, `getAuthorizationStatus()`) right as
+   Skia/Reanimated are also doing their own resume-time GPU/animation setup - plausible
+   JS-thread contention at exactly the wrong moment. Not fixed speculatively since it can't
+   be profiled from here - don't guess further without on-device Instruments data.
+
+   **What's confirmed working on a physical iPhone, Phase 0 through Phase 3
+   (2026-10-04 through 2026-10-07):**
+   - Phase 0: requestAuthorization -> pick apps (via the picker - see the "mistake" below)
+     -> `blockSelection` -> native shield appears with our custom title/subtitle/button text
+     and colors -> `unblockSelection` -> apps open normally again.
+   - A ticket unlocking apps, running out, and the shield **re-applying natively with the
+     app fully killed** (not just backgrounded) - the DeviceActivityMonitor extension's own
+     `intervalDidStart` action, independent of the JS process, confirmed by swiping the app
+     away mid-ticket and watching the shield come back on its own.
+   - Cooldown (blocks a new ticket until it elapses), the emergency valve (hold-to-confirm,
+     10 min unlock, usable exactly once/day), Focus sessions (completing pays coins, giving
+     up pays nothing - see the reward-message fix above for the one wrinkle found).
+   - A real overnight day rollover (the 04:00 boundary, not a dev-tool shortcut): tickets
+     refreshed to 3/3, an unarmed day settled correctly as +0 coins / streak reset to 0.
+   - Engine state, wallet balance/ledger, and `armed` all surviving a full force-quit +
+     relaunch (confirmed across multiple cycles, after the authorization-race fix above).
+   - Low Power Mode: no observed change in blocking/unlocking behavior.
+
+   **Still open:** whether a notification from a shielded app surfaces during an active
+   Focus session (observe-only, not yet done); the shield's "Open Mindscape" button not
+   actually reopening the app (known, see above - revisit 2026-10-08); the backgrounding/
+   foregrounding zoom-lag issue above; Phase 4 (Shop purchasing) not started.
 
    **A real on-device bug already found and fixed:** `BrainrotAppPicker.tsx` originally used
    the *inline* `DeviceActivitySelectionViewPersisted` (embedded directly in the screen).
@@ -305,16 +349,28 @@ the old `babel-preset-expo` state in its worker processes - its JS-side symptom 
 started before this dependency existed." Kill it and run
 `npx expo start --dev-client --clear`.
 
-**`ios/Podfile.properties.json` is gitignored and carries a required local override**:
-`"EXPO_USE_PRECOMPILED_MODULES": "false"`. Without it, `pod install` links Expo's
-precompiled `ExpoFont`/`ExpoModulesCore` xcframeworks for this exact SDK 57.0.21 pin, which
-are version-skewed against each other and crash on launch with `dyld: Symbol not found:
-...BaseModule...willDestroy...` - a real upstream bug, not anything in this repo. The
-tradeoff is build time: with it `false`, every Expo module compiles from source instead of
-linking a prebuilt binary, which is dramatically slower (tens of minutes, not seconds) the
-first time after a clean `Pods`/`DerivedData` wipe. Flip it back to `"true"` to test whether
-a future Expo SDK patch has fixed the mismatch - don't carry this override forward out of
-habit once it's safe to drop.
+**`ios/Podfile.properties.json` is gitignored and carries two required local overrides** -
+reapply both after any fresh `expo prebuild`:
+- `"EXPO_USE_PRECOMPILED_MODULES": "false"`. Without it, `pod install` links Expo's
+  precompiled `ExpoFont`/`ExpoModulesCore` xcframeworks for this exact SDK 57.0.21 pin,
+  which are version-skewed against each other and crash on launch with `dyld: Symbol not
+  found: ...BaseModule...willDestroy...` - a real upstream bug, not anything in this repo.
+- `"ios.buildReactNativeFromSource": "true"` (sets `RCT_USE_PREBUILT_RNCORE=0`). Without
+  it, React Native's own precompiled core (`React-Core-prebuilt` - a *separate*
+  precompilation mechanism from the one above) is version-skewed the same way and fails to
+  **link** rather than crash at launch: `ld: ... cannot link directly with 'SwiftUICore'
+  because product being built is not an allowed client of it`, with the real missing
+  symbols being React dev-support/Fabric C++ classes (`RCTPackagerConnection`,
+  `Sealable::Sealable()`) once you read past Expo CLI's filtered output - run `xcodebuild`
+  directly (not through `expo run:ios`) to see the real link invocation if this error class
+  ever needs re-diagnosing. Found 2026-10-05/06 chasing a build break that looked like it
+  was caused by adding `expo-notifications` (it wasn't - see "Where this is going" #3).
+
+Both together mean every Expo module *and* React Native's core compile from source instead
+of linking prebuilt binaries - dramatically slower (tens of minutes, not seconds) the first
+time after a clean `Pods`/`DerivedData` wipe. Flip either back to `"true"` to test whether a
+future Expo/RN patch has fixed its mismatch - don't carry these overrides forward out of
+habit once it's safe to drop one.
 
 **A small floating "Tools" button with a gear icon appears on every screen in a
 dev-client build** (briefly animates in near the top-right after launch) - that's
@@ -358,6 +414,24 @@ else), then reconnect and approve the new "Trust This Computer" prompt.
 Run `npx expo run:ios` only when native code or dependencies change. `npx tsc --noEmit`
 must be green before anything is "done" - there is **no ESLint config and no test runner**,
 so tsc + a screenshot is the whole safety net.
+
+**Installing a Release build on the physical iPhone** (for living with the ticket engine
+day-to-day, not a Metro-attached dev build):
+
+```bash
+npx expo run:ios --device --configuration Release   # will "fail" at its own install step - that's expected, see above
+xcrun devicectl device install app --device <udid> ios/build/Build/Products/Release-iphoneos/Mindscape.app
+xcrun devicectl device process launch --terminate-existing --device <udid> com.emilskotner.mindscape
+```
+
+Same `InvalidHostID` caveat as the Debug workflow above applies - let the first command
+build (it builds the Release configuration, which takes longer than Debug the first time),
+then run the two manual commands regardless of whether it reports success or that error.
+Find `<udid>` via `xcrun xctrace list devices` (the iPhone's line, not "Simulator"). A
+Release build has no Metro/dev-client dependency - it's fully standalone, safe to walk away
+from the Mac with. **Before relying on it for real:** flip "Fast test mode" off in the
+Screen time tab's Developer section first (it's currently on from testing - a Release build
+installed while it's on still runs 2-minute tickets/1-minute cooldowns, not the real rules).
 
 ## Architecture
 

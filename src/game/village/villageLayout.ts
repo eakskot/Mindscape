@@ -518,7 +518,7 @@ const buildVillageLayout = () => {
     layers,
     sceneryBands,
     sceneryGroups,
-    // Three ambient villagers who potter about the yard - see WanderingNpc
+    // Three ambient villagers who potter about the yard - see useWanderingNpcCharacters.ts
     // and Scene.wanderingNpcs' own comment on the shared-paint-slot caveat.
     // Spawns checked against the source map's own collision/scenery data
     // (grass, no layer collision, no free-standing scenery object sitting on

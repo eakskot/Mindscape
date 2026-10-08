@@ -132,7 +132,7 @@ export type Scene = {
   sceneryGroups?: SceneryGroup[];
   /**
    * Ambient characters that only wander - never walked by a tap, never
-   * trigger a portal (see WanderingNpc). Each entry is where it spawns and
+   * trigger a portal (see useWanderingNpcCharacters.ts). Each entry is where it spawns and
    * centres its roaming, in room pixels, plus which premade sheet draws it
    * (see WANDERING_NPC_SHEETS in HomeScreen.tsx - kept as a scene-agnostic
    * id here rather than a Skia DataSourceParam, the same reason scene.ts has
@@ -140,7 +140,7 @@ export type Scene = {
    * HomeScreen.tsx just doesn't mount any.
    *
    * All of them share the player's paint slot for occlusion (see
-   * HomeScreen.tsx's comment by WanderingNpc) - that approximation only
+   * HomeScreen.tsx's comment by the NPC render loop) - that approximation only
    * holds while an NPC's wander patch stays reasonably close to wherever the
    * player actually is, so don't spawn one far from where the player spends
    * most of their time without revisiting that comment.

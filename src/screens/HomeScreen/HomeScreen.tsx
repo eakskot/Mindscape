@@ -1,7 +1,6 @@
 import {
   Canvas,
   Group,
-  useCanvasRef,
   useClock,
   type DataSourceParam,
   type SkImage,
@@ -35,7 +34,7 @@ import { useVillageImages } from "../../game/Village";
 import { removeVillageSceneryGroup, VILLAGE } from "../../game/village/villageLayout";
 import { SceneryGroupVisual } from "../../game/village/SceneryGroupVisual";
 import { SceneryRemovalPrompt } from "../../game/village/SceneryRemovalPrompt";
-import { WanderingNpc } from "../../game/WanderingNpc";
+import { useWanderingNpcCharacters } from "../../game/useWanderingNpcCharacters";
 import { SettingsButton } from "../../ui/SettingsButton";
 import { useSceneGestures } from "./useSceneGestures";
 
@@ -198,49 +197,6 @@ function SceneStage({
 
   const world = useWorldItems(scene.bounds, scene.tileSize, scene.placementMask);
 
-  // Fix for "zoom/pan gets laggy after backgrounding the app and
-  // returning" (confirmed by the user, confirmed NOT the Fast-Refresh-
-  // orphaned-mapper issue - see mistake #3 - since it reproduces on a
-  // genuine background/foreground cycle). Matches a known, unresolved
-  // upstream bug (Shopify/react-native-skia#3695): on a real iOS device,
-  // Canvas's rendering surface can come back degraded after the app was
-  // actually suspended, not just backgrounded briefly - likely GPU/Metal
-  // context related, not anything specific to this app's code. The
-  // community's only known workaround is forcing a full Canvas remount,
-  // which this app tried and rejected (2026-10-08): it unmounts every
-  // on-canvas node, including each WanderingNpc's own useCharacter state
-  // (called inside WanderingNpc, unlike the player's - see that file),
-  // which reset every NPC to its spawn point and froze it for a couple of
-  // seconds - reads as "the app just launched," worse than the lag.
-  //
-  // This is the non-destructive alternative: `canvasRef.redraw()` asks
-  // Skia to issue a fresh paint pass without unmounting anything (see
-  // CanvasRef in react-native-skia's own source - it's a thin wrapper
-  // around `SkiaViewApi.requestRedraw`, a native "repaint now", not a
-  // surface recreation). Directly supported by the user's own repro: the
-  // "Clear" dev-inventory button reliably fixes the lag too, and all it
-  // does is change what's drawn (world.items -> [] -> itemEntities
-  // recomputes - see below) - i.e. *any* fresh paint command clears
-  // whatever's actually wrong, not anything about items or NPCs
-  // specifically. A few redraws spread over the first second after
-  // resuming (not just one) since it's unknown on which exact repaint the
-  // degraded state actually clears.
-  const canvasRef = useCanvasRef();
-  useEffect(() => {
-    let timers: ReturnType<typeof setTimeout>[] = [];
-    const sub = AppState.addEventListener("change", (next) => {
-      if (next !== "active") return;
-      timers.forEach(clearTimeout);
-      timers = [0, 150, 400, 900].map((delayMs) =>
-        setTimeout(() => canvasRef.current?.redraw(), delayMs),
-      );
-    });
-    return () => {
-      sub.remove();
-      timers.forEach(clearTimeout);
-    };
-  }, [canvasRef]);
-
   const [editMode, setEditMode] = useState<EditMode>("none");
   // Mirrors `editMode` into a shared value the movement/camera worklets can
   // read (a plain ref isn't safe to read on the UI thread). It's the "hold
@@ -259,11 +215,66 @@ function SceneStage({
     editModeActive,
   );
 
+  // Every ambient NPC's own movement engine - lives here, outside <Canvas>,
+  // same as the player's just above (see that hook's own comment for why -
+  // short version: a Canvas remount below must not reset NPC positions).
+  const npcCharacters = useWanderingNpcCharacters(
+    scene.wanderingNpcs,
+    world.obstacles,
+    scene.walkable,
+    scene.tileCollision,
+    editModeActive,
+    scene.tileSize,
+  );
+
   // Walking into a door switches scenes - see portals.ts. A HomeScreen-level
   // concern layered on the character's position, not something the movement
   // engine needs to know about. Only fires for a player-directed walkTo, not
   // idle wandering (see useCharacter's `controlled`).
   usePortalWatcher(x, y, controlled, scene.portals, onPortal);
+
+  // Fix for "zoom/pan gets laggy after backgrounding the app and
+  // returning" (confirmed by the user, confirmed NOT the Fast-Refresh-
+  // orphaned-mapper issue - see mistake #3 - since it reproduces on a
+  // genuine background/foreground cycle, and confirmed NOT fixed by just
+  // asking Skia to repaint - see below). Matches a known, unresolved
+  // upstream bug (Shopify/react-native-skia#3695): on a real iOS device,
+  // Canvas's rendering surface can come back degraded after the app was
+  // genuinely suspended in the background - likely GPU/Metal context
+  // related, not anything specific to this app's code.
+  //
+  // First attempt (2026-10-08) tried `canvasRef.redraw()` - a lightweight
+  // "repaint now" (react-native-skia's `CanvasRef`, a thin wrapper around
+  // the native `requestRedraw`) - specifically to avoid a full remount's
+  // downsides. Confirmed on-device: didn't fix it. That makes sense in
+  // hindsight - `redraw()` repaints using whatever surface already exists;
+  // if the surface itself is what's degraded (the GitHub issue's own
+  // suspicion), asking it to repaint changes nothing. A full Canvas remount
+  // - the community's only known workaround - is what actually forces Skia
+  // to build a fresh surface.
+  //
+  // Second attempt (2026-10-08, same day) remounted the whole `<Canvas>` on
+  // every return to foreground - this fixed the lag, but every
+  // `WanderingNpc`'s own `useCharacter` state used to live *inside* that
+  // subtree, so remounting also reset every NPC to its spawn point and
+  // froze it for a few seconds (pauseLeft's startup default) - reading as
+  // "the app just launched," which the user correctly rejected as worse
+  // than the lag.
+  //
+  // This is the corrected version: NPC movement state was lifted above
+  // `<Canvas>` into `useWanderingNpcCharacters` just above (matching how
+  // the player's already worked), so remounting the canvas now only
+  // rebuilds *drawing* - position/pause-timers/camera/items all live
+  // outside it and feed back in unchanged. There will likely still be one
+  // brief repaint on each resume (recreating a GPU surface can't be
+  // instant), but nothing should visibly jump, teleport, or freeze anymore.
+  const [canvasGeneration, setCanvasGeneration] = useState(0);
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next === "active") setCanvasGeneration((g) => g + 1);
+    });
+    return () => sub.remove();
+  }, []);
 
   const camera = useCamera({
     scene,
@@ -431,7 +442,7 @@ function SceneStage({
 
   return (
     <View style={styles.container} {...gestures.panHandlers}>
-      <Canvas ref={canvasRef} style={StyleSheet.absoluteFill}>
+      <Canvas key={canvasGeneration} style={StyleSheet.absoluteFill}>
         {/*
           Only the tile layers sit inside the world-scaled Group. The
           character and every item draw at their own `entityScale` (locked to
@@ -467,18 +478,16 @@ function SceneStage({
           shopkeeper NPC that stands somewhere specific). Drawn before the
           player so the player wins on overlap.
         */}
-        {scene.wanderingNpcs?.map((npc, index) => (
-          <WanderingNpc
+        {npcCharacters.map((npc, index) => (
+          <Character
             // Spawn is fixed per scene mount, so its index is a stable key -
             // same spirit as any other data-driven list here.
             key={index}
-            spawn={npc.spawn}
+            x={npc.x}
+            y={npc.y}
+            column={npc.column}
+            row={npc.row}
             sheet={npc.skin ? WANDERING_NPC_SHEETS[npc.skin] : undefined}
-            obstacles={world.obstacles}
-            walkable={scene.walkable}
-            tileCollision={scene.tileCollision}
-            frozen={editModeActive}
-            tileSize={scene.tileSize}
             {...camera.entityProps}
           />
         ))}

@@ -20,9 +20,9 @@ import { toScreenPoint } from "./entitySprite";
 export const PLAYER_SHEET: DataSourceParam = require("../assets/sprites/player/Premade_Character_03.png");
 /** A visibly different skin (grey hair, glasses) for a wandering NPC. */
 export const NPC_SHEET: DataSourceParam = require("../assets/sprites/player/Premade_Character_20.png");
-/** A second ambient-villager skin (red cap, teal top) - see WanderingNpc.tsx. */
+/** A second ambient-villager skin (red cap, teal top) - see useWanderingNpcCharacters.ts/HomeScreen.tsx. */
 export const NPC_SHEET_2: DataSourceParam = require("../assets/sprites/player/Premade_Character_04.png");
-/** A third ambient-villager skin (pink hair, dark outfit) - see WanderingNpc.tsx. */
+/** A third ambient-villager skin (pink hair, dark outfit) - see useWanderingNpcCharacters.ts/HomeScreen.tsx. */
 export const NPC_SHEET_3: DataSourceParam = require("../assets/sprites/player/Premade_Character_18.png");
 
 type CharacterProps = {
@@ -83,8 +83,10 @@ type CharacterProps = {
  * hook) doesn't get torn down and rebuilt for nothing. Without `memo`, any
  * unrelated state change in `SceneStage` (HomeScreen.tsx) - most of all
  * `moveItem` firing on every frame of an item drag - re-rendered every
- * `Character`/`WanderingNpc` on screen too, fighting their own per-frame
- * worklet-driven animation. That's the actual cause of movement turning
+ * `Character` on screen too (the player's and every ambient NPC's - see
+ * useWanderingNpcCharacters.ts, NPCs draw through this same component),
+ * fighting their own per-frame worklet-driven animation. That's the
+ * actual cause of movement turning
  * janky after placing/dragging a few items, not a connection issue - see
  * ItemLayer.tsx's matching `memo` on `ItemVisual`/`PlacedItemSprite`.
  */

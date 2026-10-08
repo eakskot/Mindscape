@@ -1,13 +1,14 @@
 import {
   Canvas,
   Group,
+  useCanvasRef,
   useClock,
   type DataSourceParam,
   type SkImage,
 } from "@shopify/react-native-skia";
 import { useIsFocused } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { StyleSheet, View, useWindowDimensions } from "react-native";
+import { AppState, StyleSheet, View, useWindowDimensions } from "react-native";
 import { useSharedValue } from "react-native-reanimated";
 
 import { Character, NPC_SHEET, NPC_SHEET_2, NPC_SHEET_3 } from "../../game/Character";
@@ -196,6 +197,44 @@ function SceneStage({
   const images = useItemImages();
 
   const world = useWorldItems(scene.bounds, scene.tileSize, scene.placementMask);
+
+  // Fix for "zoom/pan gets laggy after backgrounding the app and
+  // returning" (confirmed by the user, confirmed NOT the Fast-Refresh-
+  // orphaned-mapper issue - see mistake #3 - since it reproduces on a
+  // genuine background/foreground cycle). Matches a known, unresolved
+  // upstream bug (Shopify/react-native-skia#3695): on a real iOS device,
+  // Canvas's rendering surface can come back degraded after the app was
+  // actually suspended, not just backgrounded briefly - likely GPU/Metal
+  // context related, not anything specific to this app's code. The
+  // community's only known workaround is forcing a full Canvas remount,
+  // which this app tried and rejected (2026-10-08): it unmounts every
+  // on-canvas node, including each WanderingNpc's own useCharacter state
+  // (called inside WanderingNpc, unlike the player's - see that file),
+  // which reset every NPC to its spawn point and froze it for a couple of
+  // seconds - reads as "the app just launched," worse than the lag.
+  //
+  // This is the non-destructive alternative: `canvasRef.redraw()` asks
+  // Skia to issue a fresh paint pass without unmounting anything (see
+  // CanvasRef in react-native-skia's own source - it's a thin wrapper
+  // around `SkiaViewApi.requestRedraw`, a native "repaint now", not a
+  // surface recreation). Directly supported by the user's own repro: the
+  // "Clear" dev-inventory button reliably fixes the lag too, and all it
+  // does is change what's drawn (world.items -> [] -> itemEntities
+  // recomputes - see below) - i.e. *any* fresh paint command clears
+  // whatever's actually wrong, not anything about items or NPCs
+  // specifically. A few redraws spread over the first second after
+  // resuming (not just one) since it's unknown on which exact repaint the
+  // degraded state actually clears.
+  const canvasRef = useCanvasRef();
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next !== "active") return;
+      for (const delayMs of [0, 150, 400, 900]) {
+        setTimeout(() => canvasRef.current?.redraw(), delayMs);
+      }
+    });
+    return () => sub.remove();
+  }, [canvasRef]);
 
   const [editMode, setEditMode] = useState<EditMode>("none");
   // Mirrors `editMode` into a shared value the movement/camera worklets can
@@ -387,7 +426,7 @@ function SceneStage({
 
   return (
     <View style={styles.container} {...gestures.panHandlers}>
-      <Canvas style={StyleSheet.absoluteFill}>
+      <Canvas ref={canvasRef} style={StyleSheet.absoluteFill}>
         {/*
           Only the tile layers sit inside the world-scaled Group. The
           character and every item draw at their own `entityScale` (locked to

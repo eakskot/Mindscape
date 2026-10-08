@@ -85,15 +85,6 @@ export type EngineStatus =
   | "outOfTickets"
   | "focus";
 
-/** What kind of "unlocked" window is live, when status is "ticketActive" - the status itself doesn't say which. */
-export type UnlockKind = "ticket" | "emergency" | null;
-
-export type EngineEvent = {
-  t: number;
-  kind: string;
-  detail?: string;
-};
-
 /**
  * What a pure engineLogic.ts function wants done, described as data rather
  * than done directly - keeps every action/reconcile function testable with

@@ -227,13 +227,18 @@ function SceneStage({
   // degraded state actually clears.
   const canvasRef = useCanvasRef();
   useEffect(() => {
+    let timers: ReturnType<typeof setTimeout>[] = [];
     const sub = AppState.addEventListener("change", (next) => {
       if (next !== "active") return;
-      for (const delayMs of [0, 150, 400, 900]) {
-        setTimeout(() => canvasRef.current?.redraw(), delayMs);
-      }
+      timers.forEach(clearTimeout);
+      timers = [0, 150, 400, 900].map((delayMs) =>
+        setTimeout(() => canvasRef.current?.redraw(), delayMs),
+      );
     });
-    return () => sub.remove();
+    return () => {
+      sub.remove();
+      timers.forEach(clearTimeout);
+    };
   }, [canvasRef]);
 
   const [editMode, setEditMode] = useState<EditMode>("none");

@@ -15,6 +15,8 @@ export type WanderingNpcCharacter = {
   column: SharedValue<number>;
   row: SharedValue<number>;
   skin?: "npc" | "npc2" | "npc3";
+  /** See HomeScreen.tsx's frame-callback "kick" fix for why this is exposed. */
+  setFrameCallbackActive: (isActive: boolean) => void;
 };
 
 /**
@@ -62,7 +64,7 @@ export function useWanderingNpcCharacters(
     }, [npc.spawn.x, npc.spawn.y, tileSize, walkable]);
 
     // eslint-disable-next-line react-hooks/rules-of-hooks -- see doc comment above
-    const { x, y, column, row } = useCharacter(
+    const { x, y, column, row, setFrameCallbackActive } = useCharacter(
       obstacles,
       walkable,
       npc.spawn,
@@ -71,6 +73,6 @@ export function useWanderingNpcCharacters(
       wanderArea,
     );
 
-    return { x, y, column, row, skin: npc.skin };
+    return { x, y, column, row, skin: npc.skin, setFrameCallbackActive };
   });
 }

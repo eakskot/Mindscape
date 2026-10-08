@@ -217,7 +217,7 @@ export const useCamera = ({
     dims.value = { w: width, h: height };
   }, [width, height, dims]);
 
-  useFrameCallback(() => {
+  const followFrame = useFrameCallback(() => {
     "worklet";
     if (!following.value || frozen.value) {
       return;
@@ -397,5 +397,7 @@ export const useCamera = ({
     panBy,
     zoomAbout,
     settleZoom,
+    /** See HomeScreen.tsx's frame-callback "kick" fix for why this is exposed. */
+    setFrameCallbackActive: followFrame.setActive,
   };
 };

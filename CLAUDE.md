@@ -205,53 +205,57 @@ un-picked when these land.
      completion meant the cap; it now checks `focusMinutesRewardedToday >=
      FOCUS_MAX_REWARDED_MIN` and says "too short to earn a coin" otherwise.
 
-   **Post-background zoom/pan lag - unresolved, and likely not fixable in app code
-   (2026-10-06 through 2026-10-08):** the world view gets laggy specifically after
-   backgrounding the app and returning - confirmed *not* the known Fast-Refresh-orphaned-
-   Reanimated-mapper issue (mistake #3), since it reproduces on a genuine background/
-   foreground cycle, not Fast Refresh.
+   **Post-background zoom/pan lag - still being chased (2026-10-06 onward):** the world view
+   gets laggy specifically after backgrounding the app and returning - confirmed *not* the
+   known Fast-Refresh-orphaned-Reanimated-mapper issue (mistake #3), since it reproduces on
+   a genuine background/foreground cycle, not Fast Refresh. **Critical, user-confirmed
+   fact: this does NOT improve by waiting** - it stays broken indefinitely until the user
+   presses *any* button in the app (the dev inventory's "Move"/"Clear", or apparently
+   others) - at which point it's reliably fixed. Any theory that doesn't explain *why a
+   button press specifically* fixes it, and waiting never does, is wrong - this ruled out
+   an earlier "iOS hasn't restored GPU priority yet, self-resolving" theory below that was
+   floated and should not be revisited without new evidence against the button-press fact.
 
-   Four things were tried or considered, in order:
+   Five things tried or considered, in order:
    1. Hypothesis: `EngineProvider.tsx`'s `AppState`-triggered `reconcile()` causing a React
       re-render cascade. Didn't hold up - every on-canvas sprite component is already
-      `memo`'d with stable props across an unrelated re-render (mistake #17), which should
-      already block that mechanism.
+      `memo`'d with stable props across an unrelated re-render (mistake #17).
    2. Hypothesis: a known, still-open upstream Skia bug,
       [Shopify/react-native-skia#3695](https://github.com/Shopify/react-native-skia/issues/3695) -
       `<Canvas>`'s GPU surface coming back degraded after a real background suspension.
       Fix tried: `canvasRef.redraw()` (lightweight "repaint now," no remount). **Confirmed
       on-device: did not fix it.**
-   3. Fix tried: a full `<Canvas>` remount on every return to foreground, reasoning that if
-      the surface itself needs rebuilding, only a remount forces that. This was also
-      believed (not actually confirmed by the user at the time - an assumption that should
-      not have been stated as fact) to fix the lag, but definitely introduced a new problem:
-      every `WanderingNpc`'s own `useCharacter` state used to live *inside* that remounted
-      subtree, so every NPC reset to its spawn point and froze for a few seconds on each
-      resume - rejected by the user as worse than the lag.
+   3. Fix tried: a full `<Canvas>` remount on every return to foreground. Introduced a new
+      problem before the underlying fix could even be judged: every `WanderingNpc`'s own
+      `useCharacter` state used to live *inside* that remounted subtree, so every NPC reset
+      to its spawn point and froze for a few seconds on each resume.
    4. NPC movement state was lifted above `<Canvas>` into `useWanderingNpcCharacters.ts`
       (replacing the old `WanderingNpc.tsx` component - see the architecture table,
-      matching how the player's state already lived outside Canvas) specifically so the
-      same remount wouldn't reset anything - a clean architectural improvement kept
-      regardless of the outcome below. **Confirmed on-device: the lag was still there, and
-      the remount's own brief flash was, on its own, "too annoying."** The remount trigger
-      itself was reverted after this result (`useWanderingNpcCharacters.ts` was not - still
-      a real improvement on its own).
-
-   Current best explanation, found researching after both targeted fixes failed: iOS
-   restricts/reallocates an app's GPU access while it's backgrounded, and re-establishing
-   full access on return is not instant - a documented OS-level resource-management
-   behavior, not specific to Skia, Reanimated, or this app's code. This fits the evidence:
-   neither asking Skia to repaint nor forcibly rebuilding its entire rendering surface
-   changed anything, which is what you'd expect if the bottleneck is actually "the OS hasn't
-   handed GPU priority back yet" rather than anything the app's own rendering code controls.
-   Under this theory, "Move"/"Clear" appearing to fix it is most likely **coincidental
-   timing** - by the time either is pressed, enough wall-clock time has passed for iOS to
-   restore GPU priority on its own, not that either action does anything causal. Not
-   proven - just the best fit for everything observed so far, including two separate
-   fixes targeting different layers both coming up empty. No code fix currently in place;
-   if revisited, start by trying to actually measure how long the degraded window lasts
-   (does it reliably end after N seconds regardless of input?) before attempting another
-   targeted fix, rather than guessing again from app-level reasoning alone.
+      matching how the player's state already lived outside Canvas) so the same remount
+      wouldn't reset anything - kept as a real architectural improvement regardless of the
+      outcome below. **Confirmed on-device: the lag was still there, and the remount's own
+      brief flash was, on its own, "too annoying."** The remount trigger was reverted.
+      (A wrong "iOS GPU-reallocation, self-resolving" theory was floated at this point -
+      see the warning above for why it's ruled out. Don't resurrect it.)
+   5. **Current attempt**: the user's own correction (waiting never helps, only a press
+      does) pointed away from rendering/GPU entirely and toward something a touch event
+      specifically does. Found in Reanimated's own source
+      (`FrameCallbackRegistryUI.ts`): the whole app's `useFrameCallback`s (player, every
+      NPC, the camera follow loop) all share **one** `requestAnimationFrame`-driven loop,
+      which only resumes scheduling itself when the count of active callbacks goes from
+      zero back to one - and nothing in this app ever deactivated one, so that loop has
+      never had a reason to cold-restart. `useCharacter.ts`/`useCamera.ts` now expose each
+      callback's `setActive` (via `FrameCallback`'s own return value, previously
+      discarded); `HomeScreen.tsx` cycles every one of them off then back on (50ms apart)
+      on every `AppState` "active" - forcing exactly that cold restart without needing an
+      actual touch. **Not yet confirmed on-device as of this writing** - a real hypothesis
+      grounded in the library's own scheduling logic, not a repeat of the first two
+      attempts (those targeted Skia/Canvas rendering; this targets Reanimated's shared
+      animation-loop scheduling, a different layer entirely) - but still unproven. If this
+      also fails, the user's own suggested fallback is to force a real screen transition
+      (navigate away and back) on resume, which would definitely work (full remount of
+      everything, same as an app relaunch) at the cost of resetting camera position/zoom
+      each time - worth trying before concluding this is unfixable.
 
    **What's confirmed working on a physical iPhone, Phase 0 through Phase 3
    (2026-10-04 through 2026-10-07):**
@@ -275,9 +279,9 @@ un-picked when these land.
      confirmed 2026-10-08.
 
    **Still open:** whether a notification from a shielded app surfaces during an active
-   Focus session (observe-only, not yet done); the post-background zoom-lag issue above
-   (currently believed to be an OS-level GPU-reallocation delay, not fixable in app code -
-   no fix in place); Phase 4 (Shop purchasing) not started.
+   Focus session (observe-only, not yet done); the post-background zoom-lag issue above -
+   attempt #5 (the frame-callback "kick") is in place but not yet confirmed on-device;
+   Phase 4 (Shop purchasing) not started.
 
    **A real on-device bug already found and fixed:** `BrainrotAppPicker.tsx` originally used
    the *inline* `DeviceActivitySelectionViewPersisted` (embedded directly in the screen).

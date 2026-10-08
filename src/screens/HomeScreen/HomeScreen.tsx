@@ -6,8 +6,8 @@ import {
   type SkImage,
 } from "@shopify/react-native-skia";
 import { useIsFocused } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { StyleSheet, View, useWindowDimensions } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppState, StyleSheet, View, useWindowDimensions } from "react-native";
 import { useSharedValue } from "react-native-reanimated";
 
 import { Character, NPC_SHEET, NPC_SHEET_2, NPC_SHEET_3 } from "../../game/Character";
@@ -207,13 +207,15 @@ function SceneStage({
     editModeActive.value = editMode !== "none";
   }, [editMode, editModeActive]);
 
-  const { x, y, column, row, walkTo, controlled } = useCharacter(
-    world.obstacles,
-    scene.walkable,
-    spawn,
-    scene.tileCollision,
-    editModeActive,
-  );
+  const {
+    x,
+    y,
+    column,
+    row,
+    walkTo,
+    controlled,
+    setFrameCallbackActive: setPlayerFrameCallbackActive,
+  } = useCharacter(world.obstacles, scene.walkable, spawn, scene.tileCollision, editModeActive);
 
   // Every ambient NPC's own movement engine - lives here, outside <Canvas>,
   // same as the player's just above (see that hook's own comment for why -
@@ -242,6 +244,49 @@ function SceneStage({
     frozen: editModeActive,
     spawn,
   });
+
+  // Working theory (2026-10-08, third attempt) for the post-background
+  // zoom/pan lag: see CLAUDE.md "Where this is going" #... for the full
+  // history (redraw() and a full Canvas remount both confirmed NOT to fix
+  // it). Confirmed by the user: it is NOT a timing thing - it never
+  // improves by waiting, only by pressing *any* button, which a real touch
+  // can do but nothing in this app's own code has ever tried to replicate.
+  //
+  // Reanimated runs ONE shared animation loop for every `useFrameCallback`
+  // in the whole app (see node_modules/react-native-reanimated/src/
+  // frameCallback/FrameCallbackRegistryUI.ts) - the loop only resumes
+  // scheduling itself (`requestAnimationFrame(loop)`) when the count of
+  // *active* callbacks goes from zero back up to one. Nothing in this app
+  // has ever deactivated a callback during normal play (the player's, every
+  // NPC's, and the camera follow loop's are all always-on), so that shared
+  // loop has never had a reason to cold-restart itself - plausibly exactly
+  // what a real touch does at the native level, through a path (UIKit's own
+  // touch-tracking/display-priority machinery) this app can't reach
+  // directly from JS. This is the next best thing: forcibly cycle every
+  // frame callback in the scene off, then back on, a beat later - which,
+  // per the registry's own logic, drops `activeFrameCallbacks` to zero and
+  // forces a genuine cold restart, without needing an actual touch.
+  // Refs, not a dependency array, so this effect subscribes once rather
+  // than tearing down/re-adding the AppState listener on every unrelated
+  // SceneStage re-render (useCamera/useWanderingNpcCharacters don't memoize
+  // their returned objects) - same "fresh reads for a built-once
+  // subscription" pattern useSceneGestures.ts already uses.
+  const allSetActiveRef = useRef<((isActive: boolean) => void)[]>([]);
+  allSetActiveRef.current = [
+    setPlayerFrameCallbackActive,
+    ...npcCharacters.map((npc) => npc.setFrameCallbackActive),
+    camera.setFrameCallbackActive,
+  ];
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next !== "active") return;
+      allSetActiveRef.current.forEach((setActive) => setActive(false));
+      setTimeout(() => {
+        allSetActiveRef.current.forEach((setActive) => setActive(true));
+      }, 50);
+    });
+    return () => sub.remove();
+  }, []);
 
   // Which removable scenery (see villageLayout.ts's SceneryGroup) is still
   // standing, and which one (if any) is currently tapped-and-selected for

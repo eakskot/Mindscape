@@ -58,11 +58,11 @@ ways. What's in:
   through Phase 3 (2026-10-04 through 2026-10-07)**: ticket unlock/native re-lock (app
   killed), cooldown, the emergency valve, Focus paying out (and giving up paying nothing),
   a real overnight day rollover, state surviving a force-quit, and Low Power Mode. Three
-  real bugs were found and fixed along the way - see "Where this is going" #3. **Still open:
-  Phase 4 (Shop purchasing, not started), whether a notification from a shielded app
-  surfaces during an active Focus session (not yet observed), and the shield's
-  "Open Mindscape" button not actually reopening the app (known, see #3) - say so plainly
-  if asked, don't imply otherwise.**
+  real bugs were found and fixed along the way, plus the shield's "Open Mindscape" button
+  now genuinely gets you back into the app via a notification tap (2026-10-08) - see
+  "Where this is going" #3. **Still open: Phase 4 (Shop purchasing, not started), whether a
+  notification from a shielded app surfaces during an active Focus session (not yet
+  observed) - say so plainly if asked, don't imply otherwise.**
 - **Persistence** (landed 2026-10-04, alongside the engine): the wallet (+ last-100
   transaction ledger), the ticket engine's whole state, and the removed-scenery set now
   survive an app restart - see `engine/storage.ts` (a thin JSON-over-`userDefaultsSet/Get`
@@ -163,22 +163,24 @@ un-picked when these land.
    ios/Shared.swift`: it calls `openUrl("device-activity://")` (a hardcoded, unrelated URL
    scheme - "todo: replace with general string" in the library's own source) via a freshly
    constructed `NSExtensionContext()` that has no relationship to the extension's real host,
-   so `.open()` on it is a no-op. **Still unsolved - "Open Mindscape" is cosmetic; the real
-   way back in is opening the app from the Home Screen.** A workaround was built and then
-   **reverted (2026-10-04)**: a second `{type: "sendNotification", ...}` action on the same
-   button (`userInfo: {route: "/tickets"}`, posted natively by the ShieldAction extension),
-   with `expo-notifications` JS-side asking permission and deep-linking on tap
-   (`engine/notifications.ts`, now deleted). Adding `expo-notifications` broke the native
-   build with `ld: ... cannot link directly with 'SwiftUICore' because product being built
-   is not an allowed client of it` - at the time this was dead-ended as "not from its own
-   Swift source, not root-caused further," and the package was reverted. **It has since
-   been root-caused for real** (chasing the React-Core-prebuilt bug below, 2026-10-05/06):
-   the actual missing symbols were React dev-support/Fabric C++ classes
-   (`RCTPackagerConnection`, `Sealable::Sealable()`), not anything in expo-notifications -
-   "SwiftUICore" was only a warning line Expo's CLI surfaced prominently, not the real
-   blocker. Fixed generally by the `ios.buildReactNativeFromSource` override below, which
-   means expo-notifications is very likely safe to re-add now. **Not yet retried** - see
-   the TODO in `configureShield` (planned next, 2026-10-08).
+   so `.open()` on it is a no-op. **Worked around (2026-10-08, after one false start):** the
+   primary button now also fires a second `{type: "sendNotification", ...}` action
+   (`userInfo: {route: "/tickets"}`, posted natively by the ShieldAction extension) -
+   `expo-notifications` (`engine/notifications.ts`) asks for permission once at startup and
+   deep-links to `/tickets` on tap, via `useLastNotificationResponse()` (handles both tapping
+   while the app's alive and a cold launch through the tap). **Confirmed working on-device
+   (2026-10-08):** tap "Open Mindscape" -> shield closes -> notification banner -> tap it ->
+   lands on `/tickets`. Two taps, not one - the extension genuinely can't jump straight into
+   the host app, this is the closest the platform allows. First attempt at this same fix
+   (2026-10-04) broke the native build with `ld: ... cannot link directly with 'SwiftUICore'
+   because product being built is not an allowed client of it` and was reverted, dead-ended
+   at the time as "not from its own Swift source, not root-caused further." **That error was
+   a red herring** - root-caused for real while chasing the React-Core-prebuilt bug below
+   (2026-10-05/06): the actual missing symbols were React dev-support/Fabric C++ classes
+   (`RCTPackagerConnection`, `Sealable::Sealable()`), nothing to do with expo-notifications;
+   "SwiftUICore" was only a warning line Expo's CLI surfaced prominently. Fixed generally by
+   the `ios.buildReactNativeFromSource` override below - re-adding expo-notifications against
+   that fix just worked, no further issues.
 
    **Three on-device engine bugs found and fixed (2026-10-05 through 2026-10-07):**
    - **Every cold start disarmed the engine.** Right after launch,
@@ -232,10 +234,12 @@ un-picked when these land.
      relaunch (confirmed across multiple cycles, after the authorization-race fix above).
    - Low Power Mode: no observed change in blocking/unlocking behavior.
 
+   - The shield's "Open Mindscape" -> notification -> `/tickets` deep link (see above),
+     confirmed 2026-10-08.
+
    **Still open:** whether a notification from a shielded app surfaces during an active
-   Focus session (observe-only, not yet done); the shield's "Open Mindscape" button not
-   actually reopening the app (known, see above - revisit 2026-10-08); the backgrounding/
-   foregrounding zoom-lag issue above; Phase 4 (Shop purchasing) not started.
+   Focus session (observe-only, not yet done); the backgrounding/foregrounding zoom-lag
+   issue above; Phase 4 (Shop purchasing) not started.
 
    **A real on-device bug already found and fixed:** `BrainrotAppPicker.tsx` originally used
    the *inline* `DeviceActivitySelectionViewPersisted` (embedded directly in the screen).
@@ -382,11 +386,15 @@ part of the app and will not appear in a production or TestFlight build.
 **`npx expo install <pkg>` can fail its own `npm install` step with an ERESOLVE conflict
 unrelated to the package you're adding** - `expo-router`'s own dependency tree (via
 `@expo/ui`/`vaul`/`@radix-ui`, the same cluster already excluded from native autolinking -
-see "Where this is going" #4) has a latent `react-dom` peer mismatch that only surfaces when anything
-forces a fresh resolve. Confirmed harmless to route around: `npm install --legacy-peer-deps`
-(package.json already has the right entry from the failed `expo install`) installs cleanly -
-this is how `expo-notifications` got added (and later removed again - see "Where this is
-going" #3). Still run `pod install` afterward as usual.
+see "Where this is going" #4) has a latent `react-dom` peer mismatch that only surfaces when
+anything forces a fresh resolve. Not deterministic - `expo-notifications` hit this the first
+time it was added (2026-10-04) and needed `npm install --legacy-peer-deps` to route around
+(package.json already had the right entry from the failed `expo install`), then installed
+clean with no flag needed the second time (2026-10-08, after being removed and re-added -
+see "Where this is going" #3) - something about the dependency tree's exact state at
+resolve time matters, not just the package itself. If `expo install` fails this way,
+`--legacy-peer-deps` is confirmed harmless; try plain `npm install` again first, since it
+may just work. Still run `pod install` afterward either way.
 
 **A new native dependency needs a real device/simulator rebuild
 to actually work, not just `pod install`** - `pod install` only makes Xcode's project aware

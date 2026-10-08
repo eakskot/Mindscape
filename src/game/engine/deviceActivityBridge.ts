@@ -121,26 +121,18 @@ export function cancelReblock(): void {
  * but never reopens Mindscape (the library's own implementation opens a
  * hardcoded, unrelated URL scheme via a disconnected `NSExtensionContext`).
  *
- * TODO(shield fallback - retry 2026-10-08): the planned fix was a second
- * `sendNotification` action on the same button, tap handled via
- * `expo-notifications` to deep-link to /tickets. Built once
- * (`notifications.ts`, since deleted) but reverted 2026-10-04: adding
- * `expo-notifications` broke the native build with `ld: ... cannot link
- * directly with 'SwiftUICore' because product being built is not an allowed
- * client of it`. At the time this was dead-ended as "not caused by its own
- * Swift source, not root-caused further." It has since been root-caused for
- * real (chasing an unrelated build issue, 2026-10-05/06): the actual missing
- * symbols were React dev-support/Fabric C++ classes
- * (`RCTPackagerConnection`, `Sealable::Sealable()`), pointing to a version-
- * skewed **precompiled React Native core** (`React-Core-prebuilt`) - a
- * second, separate precompilation mechanism from the Expo-modules one this
- * repo already disables. "SwiftUICore" was just a warning line Expo's CLI
- * surfaced prominently, not the actual blocker. Fixed generally via
+ * Re-added 2026-10-08 (see notifications.ts): the primary button now also
+ * posts a real local notification via a second `sendNotification` action,
+ * `userInfo: {route: "/tickets"}` - tapping it from the lock screen/
+ * notification center genuinely launches the app through iOS's normal
+ * notification-tap path (`openApp` alone can't, see above). First attempt
+ * at this (2026-10-04) broke the native build and was reverted - since
+ * root-caused to an unrelated React-Core-prebuilt version skew, fixed via
  * `ios/Podfile.properties.json`'s `ios.buildReactNativeFromSource: true` -
- * see "Running it". expo-notifications was never actually the cause, so
- * it's very likely safe to re-add now. Until this is retried and confirmed,
- * "Open Mindscape" stays cosmetic - the real way back in is manually opening
- * the app from the Home Screen.
+ * see CLAUDE.md "Running it". expo-notifications was never actually the
+ * cause. **Confirmed working on-device (2026-10-08)**: tap "Open Mindscape"
+ * -> notification banner -> tap it -> lands on /tickets. The `openApp`
+ * action stays in place alongside it as a harmless no-op either way.
  */
 export function configureShield(): void {
   ReactNativeDeviceActivity.updateShield(
@@ -159,7 +151,17 @@ export function configureShield(): void {
     {
       primary: {
         behavior: "close",
-        actions: [{ type: "openApp" }],
+        actions: [
+          { type: "openApp" },
+          {
+            type: "sendNotification",
+            payload: {
+              title: "Mindscape",
+              body: "Tap to open and use a ticket.",
+              userInfo: { route: "/tickets" },
+            },
+          },
+        ],
       },
       secondary: { behavior: "close" },
     },

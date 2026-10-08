@@ -205,34 +205,53 @@ un-picked when these land.
      completion meant the cap; it now checks `focusMinutesRewardedToday >=
      FOCUS_MAX_REWARDED_MIN` and says "too short to earn a coin" otherwise.
 
-   **Post-background zoom/pan lag - root-caused and fixed, pending final on-device
-   confirmation (2026-10-06 through 2026-10-08):** the world view gets laggy specifically
-   after backgrounding the app and returning - confirmed *not* the known Fast-Refresh-
-   orphaned-Reanimated-mapper issue (mistake #3), since it reproduces on a genuine
-   background/foreground cycle. First hypothesis (an `AppState`-triggered `reconcile()`
-   causing a React re-render cascade) didn't hold up - every on-canvas sprite component is
-   already `memo`'d with stable props across an unrelated re-render (mistake #17), which
-   should already block that mechanism. Real cause: a known, still-open upstream bug,
-   [Shopify/react-native-skia#3695](https://github.com/Shopify/react-native-skia/issues/3695) -
-   on a real iOS device, `<Canvas>`'s rendering surface can come back degraded after a
-   genuine background suspension (suspected GPU/Metal context invalidation), nothing to do
-   with this app's own code. Confirmed by the user's own repro: the dev inventory's "Clear"
-   button reliably fixed it too, and all that does is force Skia to process a fresh paint
-   command - the actual mechanism, not anything about items specifically.
+   **Post-background zoom/pan lag - unresolved, and likely not fixable in app code
+   (2026-10-06 through 2026-10-08):** the world view gets laggy specifically after
+   backgrounding the app and returning - confirmed *not* the known Fast-Refresh-orphaned-
+   Reanimated-mapper issue (mistake #3), since it reproduces on a genuine background/
+   foreground cycle, not Fast Refresh.
 
-   Three attempts: (1) `canvasRef.redraw()` (a lightweight "repaint now," no remount) -
-   confirmed on-device **not** sufficient, consistent with the surface itself being what's
-   degraded, not just "nothing asked it to repaint." (2) A full `<Canvas>` remount on every
-   return to foreground - fixed the lag, but every `WanderingNpc`'s own `useCharacter` state
-   used to live *inside* that subtree, so remounting also reset every NPC to its spawn point
-   and froze it for a few seconds - user correctly rejected this as worse than the lag.
-   (3) **Current fix**: NPC movement state was lifted above `<Canvas>` into
-   `useWanderingNpcCharacters.ts` (replacing the old `WanderingNpc.tsx` component - see the
-   architecture table), matching how the player's state already lived outside Canvas. The
-   same remount now only rebuilds *drawing*, never position/pause-timers - nothing should
-   visibly jump or freeze anymore, though one brief repaint per resume is still expected
-   (recreating a GPU surface can't be instant). Not yet confirmed fixed on-device as of this
-   writing - update this once the user has actually tested it.
+   Four things were tried or considered, in order:
+   1. Hypothesis: `EngineProvider.tsx`'s `AppState`-triggered `reconcile()` causing a React
+      re-render cascade. Didn't hold up - every on-canvas sprite component is already
+      `memo`'d with stable props across an unrelated re-render (mistake #17), which should
+      already block that mechanism.
+   2. Hypothesis: a known, still-open upstream Skia bug,
+      [Shopify/react-native-skia#3695](https://github.com/Shopify/react-native-skia/issues/3695) -
+      `<Canvas>`'s GPU surface coming back degraded after a real background suspension.
+      Fix tried: `canvasRef.redraw()` (lightweight "repaint now," no remount). **Confirmed
+      on-device: did not fix it.**
+   3. Fix tried: a full `<Canvas>` remount on every return to foreground, reasoning that if
+      the surface itself needs rebuilding, only a remount forces that. This was also
+      believed (not actually confirmed by the user at the time - an assumption that should
+      not have been stated as fact) to fix the lag, but definitely introduced a new problem:
+      every `WanderingNpc`'s own `useCharacter` state used to live *inside* that remounted
+      subtree, so every NPC reset to its spawn point and froze for a few seconds on each
+      resume - rejected by the user as worse than the lag.
+   4. NPC movement state was lifted above `<Canvas>` into `useWanderingNpcCharacters.ts`
+      (replacing the old `WanderingNpc.tsx` component - see the architecture table,
+      matching how the player's state already lived outside Canvas) specifically so the
+      same remount wouldn't reset anything - a clean architectural improvement kept
+      regardless of the outcome below. **Confirmed on-device: the lag was still there, and
+      the remount's own brief flash was, on its own, "too annoying."** The remount trigger
+      itself was reverted after this result (`useWanderingNpcCharacters.ts` was not - still
+      a real improvement on its own).
+
+   Current best explanation, found researching after both targeted fixes failed: iOS
+   restricts/reallocates an app's GPU access while it's backgrounded, and re-establishing
+   full access on return is not instant - a documented OS-level resource-management
+   behavior, not specific to Skia, Reanimated, or this app's code. This fits the evidence:
+   neither asking Skia to repaint nor forcibly rebuilding its entire rendering surface
+   changed anything, which is what you'd expect if the bottleneck is actually "the OS hasn't
+   handed GPU priority back yet" rather than anything the app's own rendering code controls.
+   Under this theory, "Move"/"Clear" appearing to fix it is most likely **coincidental
+   timing** - by the time either is pressed, enough wall-clock time has passed for iOS to
+   restore GPU priority on its own, not that either action does anything causal. Not
+   proven - just the best fit for everything observed so far, including two separate
+   fixes targeting different layers both coming up empty. No code fix currently in place;
+   if revisited, start by trying to actually measure how long the degraded window lasts
+   (does it reliably end after N seconds regardless of input?) before attempting another
+   targeted fix, rather than guessing again from app-level reasoning alone.
 
    **What's confirmed working on a physical iPhone, Phase 0 through Phase 3
    (2026-10-04 through 2026-10-07):**
@@ -256,8 +275,9 @@ un-picked when these land.
      confirmed 2026-10-08.
 
    **Still open:** whether a notification from a shielded app surfaces during an active
-   Focus session (observe-only, not yet done); final on-device confirmation of the
-   zoom-lag fix above; Phase 4 (Shop purchasing) not started.
+   Focus session (observe-only, not yet done); the post-background zoom-lag issue above
+   (currently believed to be an OS-level GPU-reallocation delay, not fixable in app code -
+   no fix in place); Phase 4 (Shop purchasing) not started.
 
    **A real on-device bug already found and fixed:** `BrainrotAppPicker.tsx` originally used
    the *inline* `DeviceActivitySelectionViewPersisted` (embedded directly in the screen).
@@ -506,7 +526,7 @@ everything reusable; `src/ui/` holds navigation chrome that isn't the world.
 | `scene.ts` | The `Scene` / `Tile` / `Portal` / `SceneSceneryBand` / `SceneryGroup` shapes both scenes produce - **read this first**. Optional fields (`sceneryBands`, `sceneryGroups`, `wanderingNpcs`, `tileCollision`, `placementMask`, `topLayerName`) let a scene opt in to a feature; a scene without one costs nothing. |
 | `useCamera.ts` | The camera as a unit: `worldScale` + split `cameraX/cameraY` shared values, `transform`, `entityProps`, the follow frame-loop, and stable methods (`toRoomPoint`, `panBy`, `zoomAbout`, `settleZoom`). Its header lists the rules that must not be reverted. Owns `ENTITY_SCALE_MULTIPLIER` and `MIN/MAX_WORLD_SCALE`. |
 | `useCharacter.ts` | Movement, collision, animation on the UI thread. `frozen` holds it still (edit mode); `wanderArea` pens the idle wander to a box (NPCs). Returns `walkTo` and `controlled` (true only for a tap, so portals ignore idle wandering). |
-| `useWanderingNpcCharacters.ts` | Runs `useCharacter` (never calling `walkTo`, no portal watcher) once per `Scene.wanderingNpcs` entry, in `SceneStage` - *outside* `<Canvas>`, same as the player's own `useCharacter` call. Returns each NPC's `{x, y, column, row, skin}`; `SceneStage` draws each through a plain `<Character>` inside Canvas. Moved out of a dedicated `WanderingNpc.tsx` component (2026-10-08) specifically so an NPC's position/pause-timer state survives a Canvas remount - see the background-lag fix in HomeScreen.tsx. |
+| `useWanderingNpcCharacters.ts` | Runs `useCharacter` (never calling `walkTo`, no portal watcher) once per `Scene.wanderingNpcs` entry, in `SceneStage` - *outside* `<Canvas>`, same as the player's own `useCharacter` call. Returns each NPC's `{x, y, column, row, skin}`; `SceneStage` draws each through a plain `<Character>` inside Canvas. Moved out of a dedicated `WanderingNpc.tsx` component (2026-10-08) so an NPC's position/pause-timer state would survive a Canvas remount - see the post-background zoom-lag writeup in "Where this is going" #3 (the remount itself was later reverted as ineffective, this refactor was kept as a genuine improvement on its own). |
 | `Character.tsx` | Draws one 16x32 frame via `<Atlas>`. `sheet` prop picks the skin (`PLAYER_SHEET` / `NPC_SHEET` / `NPC_SHEET_2` / `NPC_SHEET_3`). |
 | `characterSheet.ts` | Sprite-sheet geometry + animation clips (measured, don't re-derive). |
 | `entitySprite.ts` | `toScreenPoint` (camera + scale -> screen px, device-pixel-snapped) + the `EntityProps` type. Shared by the character and every item. |

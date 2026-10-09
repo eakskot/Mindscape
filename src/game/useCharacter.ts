@@ -171,7 +171,7 @@ export const useCharacter = (
     setTarget(x.value, y.value, false);
   };
 
-  const frame = useFrameCallback((frameInfo) => {
+  useFrameCallback((frameInfo) => {
     "worklet";
     if (frozen?.value) {
       // Hold still mid-pose rather than mid-stride - reverting to idle
@@ -275,5 +275,5 @@ export const useCharacter = (
     [targetX, targetY, bestDistance, stuckFor, controlled, walkable],
   );
 
-  return { x, y, column, row, walkTo, controlled, setFrameCallbackActive: frame.setActive };
+  return { x, y, column, row, walkTo, controlled };
 };

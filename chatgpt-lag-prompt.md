@@ -14,11 +14,22 @@ On a **physical iPhone** (not reproduced on Simulator, not tested): after the ap
 and then **returns to the foreground**, the world view becomes visibly laggy/stuttery -
 panning and especially pinch-to-zoom feel like dropped frames, not smooth 60fps.
 
-**The critical, confirmed-reproducible fact**: this does **not** self-resolve by waiting.
-It stays broken indefinitely - tested over many seconds - until the user touches **any**
-button anywhere in the app's React Native UI (not necessarily anything related to the
-world view itself - any `Pressable` press anywhere). The instant a touch is registered,
-the lag is gone and stays gone until the next background/foreground cycle.
+**The critical, confirmed-reproducible facts:**
+- This does **not** self-resolve by waiting. It stays broken indefinitely with no input.
+- Touching the **game world itself** - the `PanResponder`-driven pan/pinch-zoom gestures -
+  does **NOT** fix it. (Updated finding - earlier I'd assumed "any touch" fixes it; this
+  turned out to be wrong in an important way, see below.)
+- Pressing an ordinary **UI button** elsewhere in the app (a plain `Pressable`, e.g. a
+  small toolbar button unrelated to the world view) **does** reliably fix it, instantly,
+  every time.
+- A bare, completely unrelated React `useState` update on `AppState` "active" - zero game
+  state/camera/Canvas/animation value involvement, isolated specifically to rule this in or
+  out - does **NOT** fix it either (tested on-device with logging to confirm the update
+  actually committed).
+
+So it's not "any touch," and it's not "any React re-render." It's specifically something a
+`Pressable` press does that neither a `PanResponder`-tracked touch on the world nor a plain
+state commit does.
 
 ## What's already been ruled out (all confirmed on a real device, not guessed)
 
@@ -43,14 +54,23 @@ the lag is gone and stays gone until the next background/foreground cycle.
    `AppState` "active" event, called `setActive(false)` on all of them, waited 50ms, then
    `setActive(true)` on all of them - forcing a genuine cold-restart of that shared loop.
    Tried, confirmed zero effect on-device.
+6. **Not fixed by a bare React re-render either.** An isolated test: on `AppState`
+   "active", bump a `useState` counter that nothing else reads - zero game state, camera,
+   Canvas key, or animation value touched, just a plain commit, confirmed via a
+   `console.log` inside its own effect (the log did fire). Confirmed on-device: the lag was
+   still there. Rules out "any React commit is sufficient" as cleanly as the world-touch
+   finding rules out "any touch is sufficient."
 
-So: two different attempts at the Skia/GPU rendering layer failed, and one attempt at the
-Reanimated animation-scheduling layer also failed. The one thing that reliably, instantly
-fixes it is an actual touch/press event somewhere in the app - which strongly suggests the
-real mechanism lives somewhere neither of those layers: possibly in UIKit's own touch
-delivery/gesture-recognizer system (`RCTTouchHandler`, which is itself a
-`UIGestureRecognizer` subclass under React Native's hood) and how iOS schedules/prioritizes
-`CADisplayLink`-driven rendering relative to active touch tracking.
+So: two different attempts at the Skia/GPU rendering layer failed, one attempt at the
+Reanimated animation-scheduling layer failed, and a bare React re-render on its own also
+failed. Combined with the world-touch-doesn't-fix-it / UI-button-does split above, the real
+mechanism seems to be something specific to how a `Pressable` press is handled that neither
+a `PanResponder`-tracked touch on the world, a Reanimated-layer kick, nor a plain React
+commit replicates - possibly in UIKit's own touch delivery/gesture-recognizer system
+(`RCTTouchHandler`, itself a `UIGestureRecognizer` subclass under React Native's hood,
+though how a `Pressable`'s touch handling differs from a raw `PanResponder`'s at that layer
+isn't something I've been able to pin down from JS/TS source alone) and how iOS schedules/
+prioritizes `CADisplayLink`-driven rendering relative to active touch tracking.
 
 ## What I want help figuring out
 
@@ -66,9 +86,14 @@ delivery/gesture-recognizer system (`RCTTouchHandler`, which is itself a
    small native module if genuinely necessary) that can replicate whatever effect a real
    touch has, so this can be done programmatically on `AppState` "active" instead of
    requiring the user to tap something?
-3. Alternatively: is switching the app's gesture handling from React Native's plain
-   `PanResponder` to `react-native-gesture-handler`'s native `Gesture` API (which registers
-   real `UIGestureRecognizer`s, unlike `PanResponder`) plausible as a fix, given the above?
+3. Most pointed question given the world-touch-vs-button split above: what's actually
+   different, at the native level, between how a `Pressable` press is delivered/handled on
+   iOS vs. how a touch tracked by a raw `PanResponder` (attached to a plain `View` covering
+   the Skia Canvas) is? Is `Pressable` doing something a `PanResponder`-tracked view
+   doesn't (e.g. a different `UIGestureRecognizer` setup, `pointerEvents` handling,
+   accessibility/focus system interaction)? Is switching the world view's own gesture
+   handling from `PanResponder` to `react-native-gesture-handler`'s native `Gesture` API
+   (already an unused transitive dependency) plausible as a fix, given this?
 4. Any other diagnostic I should run on-device (Xcode Instruments template, specific
    signpost/trace to capture) to actually see what's different about the frame timing
    before vs. after a touch, since I don't have Instruments access myself in this

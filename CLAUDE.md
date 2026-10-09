@@ -205,18 +205,28 @@ un-picked when these land.
      completion meant the cap; it now checks `focusMinutesRewardedToday >=
      FOCUS_MAX_REWARDED_MIN` and says "too short to earn a coin" otherwise.
 
-   **Post-background zoom/pan lag - still being chased (2026-10-06 onward):** the world view
+   **Post-background zoom/pan lag - still unsolved (2026-10-06 onward), now also being
+   investigated via an external ChatGPT session (see `chatgpt-lag-prompt.md` at the repo
+   root - full context dump, keep it current if this continues there):** the world view
    gets laggy specifically after backgrounding the app and returning - confirmed *not* the
    known Fast-Refresh-orphaned-Reanimated-mapper issue (mistake #3), since it reproduces on
-   a genuine background/foreground cycle, not Fast Refresh. **Critical, user-confirmed
-   fact: this does NOT improve by waiting** - it stays broken indefinitely until the user
-   presses *any* button in the app (the dev inventory's "Move"/"Clear", or apparently
-   others) - at which point it's reliably fixed. Any theory that doesn't explain *why a
-   button press specifically* fixes it, and waiting never does, is wrong - this ruled out
-   an earlier "iOS hasn't restored GPU priority yet, self-resolving" theory below that was
-   floated and should not be revisited without new evidence against the button-press fact.
+   a genuine background/foreground cycle, not Fast Refresh.
 
-   Five things tried or considered, in order:
+   **Confirmed facts, load-bearing for any future theory:**
+   - Does **not** improve by waiting - stays broken indefinitely with no input.
+   - Touching the game world itself (the `PanResponder`-driven pan/zoom gestures) does
+     **not** fix it.
+   - Pressing an ordinary UI button elsewhere in the app (`Pressable`-based, e.g. the dev
+     inventory's "Move"/"Clear") **does** reliably fix it.
+   - A bare, unrelated React state update on `AppState` "active" - zero game state/camera/
+     Canvas-key/animation involvement, confirmed via an isolated diagnostic (see attempt 6
+     below) - does **not** fix it on its own.
+
+   Any theory has to explain all four at once: not timing, not any touch, specifically a
+   `Pressable`-style UI button, and not merely "a React render happened."
+
+   Six things tried or considered so far, all reverted/removed after being ruled out -
+   don't re-attempt any of these without new evidence:
    1. Hypothesis: `EngineProvider.tsx`'s `AppState`-triggered `reconcile()` causing a React
       re-render cascade. Didn't hold up - every on-canvas sprite component is already
       `memo`'d with stable props across an unrelated re-render (mistake #17).
@@ -232,30 +242,36 @@ un-picked when these land.
    4. NPC movement state was lifted above `<Canvas>` into `useWanderingNpcCharacters.ts`
       (replacing the old `WanderingNpc.tsx` component - see the architecture table,
       matching how the player's state already lived outside Canvas) so the same remount
-      wouldn't reset anything - kept as a real architectural improvement regardless of the
-      outcome below. **Confirmed on-device: the lag was still there, and the remount's own
-      brief flash was, on its own, "too annoying."** The remount trigger was reverted.
-      (A wrong "iOS GPU-reallocation, self-resolving" theory was floated at this point -
-      see the warning above for why it's ruled out. Don't resurrect it.)
-   5. **Current attempt**: the user's own correction (waiting never helps, only a press
-      does) pointed away from rendering/GPU entirely and toward something a touch event
-      specifically does. Found in Reanimated's own source
-      (`FrameCallbackRegistryUI.ts`): the whole app's `useFrameCallback`s (player, every
-      NPC, the camera follow loop) all share **one** `requestAnimationFrame`-driven loop,
+      wouldn't reset anything - **kept** (the one change from this whole investigation that
+      stayed, as a real architectural improvement independent of the lag fix itself).
+      **Confirmed on-device: the lag was still there, and the remount's own brief flash
+      was, on its own, "too annoying."** The remount trigger was reverted.
+   5. Hypothesis: Reanimated runs **one shared** `requestAnimationFrame`-driven loop for
+      every `useFrameCallback` in the app (confirmed by reading
+      `node_modules/react-native-reanimated/src/frameCallback/FrameCallbackRegistryUI.ts`),
       which only resumes scheduling itself when the count of active callbacks goes from
-      zero back to one - and nothing in this app ever deactivated one, so that loop has
-      never had a reason to cold-restart. `useCharacter.ts`/`useCamera.ts` now expose each
-      callback's `setActive` (via `FrameCallback`'s own return value, previously
-      discarded); `HomeScreen.tsx` cycles every one of them off then back on (50ms apart)
-      on every `AppState` "active" - forcing exactly that cold restart without needing an
-      actual touch. **Not yet confirmed on-device as of this writing** - a real hypothesis
-      grounded in the library's own scheduling logic, not a repeat of the first two
-      attempts (those targeted Skia/Canvas rendering; this targets Reanimated's shared
-      animation-loop scheduling, a different layer entirely) - but still unproven. If this
-      also fails, the user's own suggested fallback is to force a real screen transition
-      (navigate away and back) on resume, which would definitely work (full remount of
-      everything, same as an app relaunch) at the cost of resetting camera position/zoom
-      each time - worth trying before concluding this is unfixable.
+      zero back to one - and nothing in this app ever deactivated one. Fix tried: cycle
+      every `useFrameCallback` (player, every NPC, camera follow) off then back on via
+      their `setActive`, on every `AppState` "active". **Confirmed on-device: did not fix
+      it.** Fully reverted (the `setActive` exposure in `useCharacter.ts`/`useCamera.ts`/
+      `useWanderingNpcCharacters.ts` was removed too, not just the trigger).
+   6. **Isolated diagnostic (2026-10-09, test designed via ChatGPT)**: to isolate whether
+      *any* React re-render - not specifically a Skia/Canvas/Reanimated one - is what a
+      touch's fix depends on, a single, wholly unrelated `useState` counter was bumped on
+      `AppState` "active" (logged via `console.log`, zero game/camera/Canvas-key/animation
+      involvement). **Confirmed on-device: did not fix it either.** Removed after the
+      result - see this section's "Confirmed facts" above for what it ruled out.
+
+   **Current status: no working fix, nothing currently in place.** The strongest remaining
+   clue is the world-touch/UI-button split (fact 2 vs. fact 3 above) - whatever this is,
+   it's not about touches in general, specifically about something tied to how/where a
+   `Pressable` differs from the custom `PanResponder` driving the world view. Worth
+   investigating next: whether `Pressable`'s touch handling goes through a genuinely
+   different native path (e.g. `RCTTouchHandler`'s delivery to a `Pressable` vs. a raw
+   `PanResponder`-attached view) that could plausibly matter here. The user's own suggested
+   fallback, not yet tried, is guaranteed to work at a real cost: force a full screen
+   transition (navigate away and back) on resume - a true remount of everything, same as an
+   app relaunch, at the cost of resetting camera position/zoom on every resume.
 
    **What's confirmed working on a physical iPhone, Phase 0 through Phase 3
    (2026-10-04 through 2026-10-07):**
@@ -280,8 +296,8 @@ un-picked when these land.
 
    **Still open:** whether a notification from a shielded app surfaces during an active
    Focus session (observe-only, not yet done); the post-background zoom-lag issue above -
-   attempt #5 (the frame-callback "kick") is in place but not yet confirmed on-device;
-   Phase 4 (Shop purchasing) not started.
+   six attempts in, still unsolved, no fix currently in place; Phase 4 (Shop purchasing)
+   not started.
 
    **A real on-device bug already found and fixed:** `BrainrotAppPicker.tsx` originally used
    the *inline* `DeviceActivitySelectionViewPersisted` (embedded directly in the screen).

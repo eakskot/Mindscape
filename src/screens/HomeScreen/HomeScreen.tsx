@@ -145,6 +145,25 @@ export default function HomeScreen() {
     [wallet],
   );
 
+  // TEMP diagnostic (2026-10-09, see CLAUDE.md's post-background lag
+  // writeup) - isolating one variable: does a wholly unrelated React state
+  // update on AppState "active" - zero game state, camera, Canvas key, or
+  // animation value involvement - alone clear the lag, with no touch at
+  // all? Remove once this is answered either way; do not build a fix on
+  // top of this file until then.
+  const [diagPing, setDiagPing] = useState(0);
+  useEffect(() => {
+    console.log(`[DIAG] state committed t=${Date.now()} ping=${diagPing}`);
+  }, [diagPing]);
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next !== "active") return;
+      console.log(`[DIAG] AppState active t=${Date.now()}`);
+      setDiagPing((p) => p + 1);
+    });
+    return () => sub.remove();
+  }, []);
+
   return (
     <View style={styles.root}>
       <SceneStage
@@ -277,16 +296,22 @@ function SceneStage({
     ...npcCharacters.map((npc) => npc.setFrameCallbackActive),
     camera.setFrameCallbackActive,
   ];
-  useEffect(() => {
-    const sub = AppState.addEventListener("change", (next) => {
-      if (next !== "active") return;
-      allSetActiveRef.current.forEach((setActive) => setActive(false));
-      setTimeout(() => {
-        allSetActiveRef.current.forEach((setActive) => setActive(true));
-      }, 50);
-    });
-    return () => sub.remove();
-  }, []);
+  // DISABLED (2026-10-09) for the isolated diagnostic test below (see
+  // HomeScreen's own TEMP block) - this effect also fires on AppState
+  // "active" and would confound a clean read on whether a plain, unrelated
+  // state update alone clears the lag. Confirmed on-device this attempt
+  // didn't fix the lag on its own either way - re-enable only if revisiting
+  // this specific angle, not by default.
+  // useEffect(() => {
+  //   const sub = AppState.addEventListener("change", (next) => {
+  //     if (next !== "active") return;
+  //     allSetActiveRef.current.forEach((setActive) => setActive(false));
+  //     setTimeout(() => {
+  //       allSetActiveRef.current.forEach((setActive) => setActive(true));
+  //     }, 50);
+  //   });
+  //   return () => sub.remove();
+  // }, []);
 
   // Which removable scenery (see villageLayout.ts's SceneryGroup) is still
   // standing, and which one (if any) is currently tapped-and-selected for

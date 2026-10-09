@@ -8,6 +8,7 @@ import {
 import { useIsFocused } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { StyleSheet, View, useWindowDimensions } from "react-native";
+import { GestureDetector } from "react-native-gesture-handler";
 import { useSharedValue } from "react-native-reanimated";
 
 import { Character, NPC_SHEET, NPC_SHEET_2, NPC_SHEET_3 } from "../../game/Character";
@@ -398,8 +399,22 @@ function SceneStage({
   );
 
   return (
-    <View style={styles.container} {...gestures.panHandlers}>
-      <Canvas style={StyleSheet.absoluteFill}>
+    <View style={styles.outer}>
+      {/*
+        GestureDetector wraps only the Canvas's own container - not
+        SceneryRemovalPrompt/DevInventory below, which are true siblings
+        instead. With the old PanResponder this safety was a config flag
+        (`onMoveShouldSetPanResponder: () => false`, "never take the
+        responder away from the dev inventory's buttons"); with Gesture
+        Handler the simplest, most robust equivalent is structural - these
+        buttons are never inside the gesture's own view tree at all, so
+        there's nothing for it to compete with in the first place. See
+        useSceneGestures.ts's own header comment for why this migrated off
+        PanResponder in the first place.
+      */}
+      <GestureDetector gesture={gestures.gesture}>
+        <View style={styles.container}>
+          <Canvas style={StyleSheet.absoluteFill}>
         {/*
           Only the tile layers sit inside the world-scaled Group. The
           character and every item draw at their own `entityScale` (locked to
@@ -478,7 +493,9 @@ function SceneStage({
           valid={gestures.dragValid}
           {...camera.entityProps}
         />
-      </Canvas>
+          </Canvas>
+        </View>
+      </GestureDetector>
 
       {selectedSceneryGroup && (
         <SceneryRemovalPrompt
@@ -514,6 +531,13 @@ function SceneStage({
 
 const styles = StyleSheet.create({
   root: {
+    flex: 1,
+  },
+  // The SceneStage root - GestureDetector's wrapped `container` below sits
+  // inside this, with SceneryRemovalPrompt/DevInventory as true siblings
+  // (both self-positioning, position: absolute - see HomeScreen's own
+  // comment on why they're structured this way).
+  outer: {
     flex: 1,
   },
   container: {

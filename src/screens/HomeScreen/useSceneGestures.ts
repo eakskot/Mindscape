@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PanResponder } from "react-native";
+import { Gesture, type GestureTouchEvent } from "react-native-gesture-handler";
 
 import type { EditMode } from "../../game/items/editMode";
 import type { ItemId } from "../../game/items/itemCatalog";
@@ -27,10 +27,28 @@ type Args = {
 };
 
 /**
- * The one PanResponder for the world view. It never re-creates itself (so a
- * gesture in flight is never dropped), reading current state through refs and
- * `camera`'s live shared values. It multiplexes four gestures:
+ * The one gesture for the world view. Migrated from a plain `PanResponder`
+ * to `react-native-gesture-handler` (2026-10-09, `experiment/gesture-
+ * handler-migration` branch) chasing the post-background lag - see
+ * CLAUDE.md's writeup: touching the world itself never fixed that lag,
+ * while an ordinary `Pressable` button elsewhere always did, which pointed
+ * at *how* a touch is delivered as the actual variable, not anything this
+ * file's own logic does. Gesture Handler delivers touches through a real
+ * native `UIGestureRecognizer`, same general family as whatever a
+ * `Pressable` press uses - `PanResponder` does not. If this fixes the lag,
+ * keep it; if not, this whole file reverts cleanly (see the branch).
  *
+ * Deliberately built on the *raw* multi-touch callbacks
+ * (`onTouchesDown`/`onTouchesMove`/`onTouchesUp`/`onTouchesCancelled`) with
+ * `.runOnJS(true)`, not the gesture's own high-level pan/pinch activation
+ * semantics - this is a direct, same-shape port of the exact state machine
+ * that already worked correctly as a `PanResponder`, swapping only the
+ * event source. Keeps every bit of proven logic (the tap/drag threshold,
+ * the rAF-throttled item-drag commit, the pinch math, the scenery-tap-vs-
+ * walk precedence) completely unchanged - see each branch's comment below,
+ * copied from the original.
+ *
+ * It multiplexes four gestures, same as before:
  * - **two fingers** -> pinch-zoom (pre-empts everything else)
  * - **one finger on a placed item, in move/delete mode** -> drag / delete it
  * - **one finger on the background, moved past a threshold** -> pan the camera
@@ -39,8 +57,16 @@ type Args = {
  * Outside move/delete mode items are inert - every touch is a plain
  * walk/pan, so a touch near a big fountain isn't eaten as an accidental grab.
  *
- * Returns the pan handlers plus the "which item is held, and would its drop
- * be legal" state DragHighlight needs.
+ * `runOnJS(true)` matters beyond matching the old behavior: every helper
+ * here (`itemAt`, `isValidPlacement`, `toRoomPoint`, the `setDraggedInstanceId`/
+ * `setDragValid` React state writes) is plain JS, not worklet code - without
+ * `runOnJS(true)` Gesture Handler would try to run these callbacks on the UI
+ * thread by default (since Reanimated is installed), which none of this is
+ * written for.
+ *
+ * Returns the `Gesture` (to hand to a `<GestureDetector>`, not spread as
+ * `panHandlers` - see HomeScreen.tsx) plus the same "which item is held,
+ * and would its drop be legal" state DragHighlight needs.
  */
 export const useSceneGestures = ({
   camera,
@@ -65,7 +91,7 @@ export const useSceneGestures = ({
   const [draggedInstanceId, setDraggedInstanceId] = useState<string | null>(null);
   const [dragValid, setDragValid] = useState(true);
 
-  // Fresh reads for the built-once responder.
+  // Fresh reads for the built-once gesture.
   const worldRef = useRef(world);
   worldRef.current = world;
   const editModeRef = useRef(editMode);
@@ -112,7 +138,7 @@ export const useSceneGestures = ({
   // a cheap shared-value write - `moveItem` deliberately goes through real
   // state, see useWorldItems.ts, since the dragged item's live position has
   // to be visible to collision/placement checks and survive a scene's own
-  // re-renders the same way every other item does). `onPanResponderMove`
+  // re-renders the same way every other item does). `onTouchesMove`
   // itself still runs on every touch event and keeps `drag.current.lastX/Y`
   // exactly current - only the React-visible commit is throttled, so a
   // release (which reads `drag.current` directly, never the throttled
@@ -141,14 +167,34 @@ export const useSceneGestures = ({
         roomY <= group.bounds.maxY,
     );
 
-  const responder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        // Never take the responder away from the dev inventory's buttons.
-        onMoveShouldSetPanResponder: () => false,
+  /** Ends a drag/pan/pinch cleanly without committing anything - used by onTouchesCancelled. */
+  const resetGestureState = () => {
+    cancelDragFrame();
+    drag.current = null;
+    pan.current = null;
+    pinch.current = null;
+    gestureWasPinch.current = false;
+    setDraggedInstanceId(null);
+  };
 
-        onPanResponderGrant: (event) => {
+  const gesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .runOnJS(true)
+        .maxPointers(2)
+        .minPointers(1)
+        // A real pinch/pan/drag must win over any button/Touchable nearby
+        // without this hijacking an actual tap on one - DevInventory and
+        // SceneryRemovalPrompt are rendered as siblings *outside* this
+        // gesture's own view (see HomeScreen.tsx), not descendants, so
+        // there is nothing for it to compete with in the first place.
+        .onTouchesDown((e: GestureTouchEvent) => {
+          // Only the first finger down starts a new gesture - a second
+          // finger arriving (pinch start) is handled by onTouchesMove's
+          // own `touches.length >= 2` branch below, same split the old
+          // PanResponder's onPanResponderGrant/onPanResponderMove had.
+          if (e.numberOfTouches !== 1) return;
+
           pinch.current = null;
           gestureWasPinch.current = false;
           // A stray queued frame from a previous drag must never commit
@@ -157,8 +203,8 @@ export const useSceneGestures = ({
           // already protects against committing the wrong item either way.
           cancelDragFrame();
 
-          const { locationX, locationY } = event.nativeEvent;
-          const { roomX, roomY } = toRoomPoint(locationX, locationY);
+          const touch = e.allTouches[0];
+          const { roomX, roomY } = toRoomPoint(touch.x, touch.y);
 
           const item =
             editModeRef.current !== "none"
@@ -168,8 +214,8 @@ export const useSceneGestures = ({
             drag.current = null;
             const cam = snapshot();
             pan.current = {
-              startX: locationX,
-              startY: locationY,
+              startX: touch.x,
+              startY: touch.y,
               startCameraX: cam.x,
               startCameraY: cam.y,
               moved: false,
@@ -195,19 +241,15 @@ export const useSceneGestures = ({
           };
           setDraggedInstanceId(item.instanceId);
           setDragValid(true);
-        },
-
-        onPanResponderMove: (event) => {
+        })
+        .onTouchesMove((e: GestureTouchEvent) => {
           // Two fingers = pinch, which pre-empts panning and tap-to-walk. (An
           // item drag in flight wins - two fingers mid-drag isn't a gesture.)
-          const touches = event.nativeEvent.touches;
-          if (touches.length >= 2 && !drag.current) {
-            const [a, b] = touches;
-            const dist = Math.sqrt(
-              (a.locationX - b.locationX) ** 2 + (a.locationY - b.locationY) ** 2,
-            );
-            const focalX = (a.locationX + b.locationX) / 2;
-            const focalY = (a.locationY + b.locationY) / 2;
+          if (e.numberOfTouches >= 2 && !drag.current) {
+            const [a, b] = e.allTouches;
+            const dist = Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+            const focalX = (a.x + b.x) / 2;
+            const focalY = (a.y + b.y) / 2;
             if (!pinch.current) {
               pan.current = null;
               gestureWasPinch.current = true;
@@ -232,10 +274,12 @@ export const useSceneGestures = ({
             return;
           }
 
+          const touch = e.allTouches[0];
+          if (!touch) return;
+
           const itemDrag = drag.current;
           if (itemDrag) {
-            const { locationX, locationY } = event.nativeEvent;
-            const { roomX, roomY } = toRoomPoint(locationX, locationY);
+            const { roomX, roomY } = toRoomPoint(touch.x, touch.y);
             // Always current, every touch event - the finger never lags.
             itemDrag.lastX = roomX - itemDrag.grabX;
             itemDrag.lastY = roomY - itemDrag.grabY;
@@ -279,9 +323,8 @@ export const useSceneGestures = ({
           if (!panDrag) {
             return;
           }
-          const { locationX, locationY } = event.nativeEvent;
-          const dx = locationX - panDrag.startX;
-          const dy = locationY - panDrag.startY;
+          const dx = touch.x - panDrag.startX;
+          const dy = touch.y - panDrag.startY;
           if (
             !panDrag.moved &&
             dx * dx + dy * dy < TAP_DRAG_THRESHOLD * TAP_DRAG_THRESHOLD
@@ -290,9 +333,14 @@ export const useSceneGestures = ({
           }
           panDrag.moved = true;
           panBy(panDrag.startCameraX, panDrag.startCameraY, dx, dy);
-        },
+        })
+        .onTouchesUp((e: GestureTouchEvent) => {
+          // Only a true release (every finger up) ends the gesture - one
+          // finger lifting mid-pinch (numberOfTouches still > 0) is handled
+          // by the next onTouchesMove call falling below the `>= 2` branch,
+          // same as the old PanResponder's behavior.
+          if (e.numberOfTouches !== 0) return;
 
-        onPanResponderRelease: (event) => {
           // A pinch this gesture: the lift ends a zoom, not a tap.
           if (gestureWasPinch.current) {
             gestureWasPinch.current = false;
@@ -347,8 +395,9 @@ export const useSceneGestures = ({
             return;
           }
 
-          const { locationX, locationY } = event.nativeEvent;
-          const { roomX, roomY } = toRoomPoint(locationX, locationY);
+          const touch = e.changedTouches[0];
+          if (!touch) return;
+          const { roomX, roomY } = toRoomPoint(touch.x, touch.y);
 
           // A tap on a removable tree selects it instead of walking there -
           // tapping the same one again (or empty ground - see below) clears
@@ -371,8 +420,14 @@ export const useSceneGestures = ({
           walkToRef.current(roomX, roomY);
           // Deliberately not touching the camera here - see useCamera's
           // `following` note. A tap only ever aims the character.
-        },
-      }),
+        })
+        // Not in the original PanResponder (which had no onPanResponderTerminate
+        // handler at all - a latent gap) - if iOS cancels the gesture mid-flight
+        // (an incoming call, a system gesture taking over), make sure nothing
+        // is left stuck mid-drag/mid-pinch rather than silently losing track.
+        .onTouchesCancelled(() => {
+          resetGestureState();
+        }),
     // Every dependency is a stable ref/shared value, or (the two scale
     // bounds) a primitive that's constant for the life of the mount.
     [
@@ -388,7 +443,7 @@ export const useSceneGestures = ({
   );
 
   return {
-    panHandlers: responder.panHandlers,
+    gesture,
     draggedInstanceId,
     dragValid,
   };

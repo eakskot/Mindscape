@@ -1,6 +1,7 @@
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { configureReanimatedLogger, ReanimatedLogLevel } from "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -52,19 +53,28 @@ export default function RootLayout() {
   useNotificationTapNavigation();
 
   return (
-    <SafeAreaProvider>
-      <WalletProvider>
-        <EngineProvider>
-          <StatusBar style="light" />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="focus" options={{ presentation: "modal" }} />
-            <Stack.Screen name="settings" options={{ presentation: "modal" }} />
-            <Stack.Screen name="tickets" options={{ presentation: "modal" }} />
-            <Stack.Screen name="summary" options={{ presentation: "modal" }} />
-          </Stack>
-        </EngineProvider>
-      </WalletProvider>
-    </SafeAreaProvider>
+    // Required by react-native-gesture-handler (added 2026-10-09,
+    // `experiment/gesture-handler-migration` branch - see
+    // useSceneGestures.ts) the moment anything actually uses its Gesture
+    // API, which the Village screen's world view now does - without this
+    // wrapper every gesture silently does nothing. Outermost, same as the
+    // library's own docs show, so it's never inside anything that could
+    // clip its native view.
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <WalletProvider>
+          <EngineProvider>
+            <StatusBar style="light" />
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="(tabs)" />
+              <Stack.Screen name="focus" options={{ presentation: "modal" }} />
+              <Stack.Screen name="settings" options={{ presentation: "modal" }} />
+              <Stack.Screen name="tickets" options={{ presentation: "modal" }} />
+              <Stack.Screen name="summary" options={{ presentation: "modal" }} />
+            </Stack>
+          </EngineProvider>
+        </WalletProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

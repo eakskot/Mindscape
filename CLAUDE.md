@@ -537,7 +537,11 @@ everything reusable; `src/ui/` holds navigation chrome that isn't the world.
 | File | Responsibility |
 |---|---|
 | `TabBar/tabs.config.ts` | The bottom bar's content, left to right, as one array (`kind: 'tab' \| 'action'`) - `TabBar.tsx` and `(tabs)/_layout.tsx` both derive from it. Add a tab here + its route file, nothing else to touch. |
-| `TabBar/theme.ts` | Every color/radius/size/label constant the tab bar (and Focus/Shop/Screen time/Profile/Settings) draws from. |
+| `theme/palettes.ts` | The design tokens: `lightPalette`/`darkPalette` (same semantic keys - `bg`, `surface`, `surfaceRaised`, `modalBg`, `floatingBg`, `textPrimary`, `accent`/`accentText`, `danger`, `coin`, `tabBar*`, ...) + shared `tokens` (spacing, radii, font sizes, font family). The only file in `src/ui`/`app` allowed to contain a color literal. |
+| `theme/ThemeProvider.tsx` | `ThemeProvider`/`useTheme()` → `{palette, scheme, preference, setPreference}`. Preference `'light' \| 'dark' \| 'system'`, default light, persisted via `engine/storage.ts` (`themePreference`), hydrated synchronously in the `useState` initializer (no wrong-theme flash). Mirrors it to native via `Appearance.setColorScheme` (`'unspecified'` for system). Mounted at the top of `app/_layout.tsx`. |
+| `theme/makeStyles.ts` | `makeStyles((c, t) => ({...}))` → a `useStyles()` hook, memoized per palette - the pattern every UI file uses instead of module-level `StyleSheet.create`. Also `floatingSurface(c)`: the shared surface+border+shadow for anything floating over the Skia world. |
+| `theme/AppearancePicker.tsx` | Light/Dark/System segmented control (Settings → Appearance). Profile has a one-tap dark-mode `Switch` too. |
+| `TabBar/theme.ts` | Tab-bar layout constants (sizes, motion) + re-exported radii and `strings.labels`. **No colors** - those come from the palette; there is one theme system. |
 | `TabBar/TabBar.tsx` | The custom `tabBar`. Also exports `useTabBarHeight()` (bar + safe area + the Focus button's overhang) for anything a tab screen pins above the bar - the bar is absolutely positioned over the screen. Crossfades two stacked Feather icons (grey/white) rather than animating the glyph's own `color` prop - robust regardless of how `@expo/vector-icons` merges an animated style internally. The center Focus button is a flex spacer with an absolutely-positioned circle poking up out of it (`playButtonLift`), so it keeps the bar's 5 equal slots while floating above the bar's top edge. |
 | `SettingsButton.tsx` | The Village screen's gear button → `/settings`. Gated on `useIsFocused()` in HomeScreen.tsx - bottom-tabs' hiding of an unfocused screen didn't fully clip this `Pressable`'s native view without it (plain `View`s like `CurrencyHud` weren't affected). |
 | `strings.ts` | User-facing copy for the Village overlay (TodayCard, StreakBadge, edit controls). |
@@ -625,6 +629,24 @@ Camera / zoom (see `useCamera.ts`'s header too):
   needs a "recentre on me" it must be an eased camera move, not this flag flipping back.
 - **Camera translate and every entity's screen position snap to the *device* pixel grid**
   (`snapToDevicePixel`, `PixelRatio.get()`), not a whole RN point (3x too coarse -> choppy).
+
+Theme (2026-10-12, `feat/theme`):
+
+- **Semantic tokens only.** UI code asks for a role (`c.textSecondary`, `c.surfaceRaised`),
+  never a color - no hex/rgba literal in any UI file outside `src/ui/theme/palettes.ts`.
+  A new color need = a new semantic key in *both* palettes.
+- **World art is not themed.** Tiles, sprites and Skia highlights (`DragHighlight`,
+  `SceneryGroupVisual`, HomeScreen's `#15151d` canvas backdrop) keep their literals and
+  look identical in both schemes.
+- **Default is light** (warm cream sampled against the village tilesets); dark is the
+  original look. Both palettes' body-text pairs are >= 4.5:1 (light textPrimary/bg 12.6,
+  textSecondary/bg 5.1, white/accent 5.3; dark textSecondary/surfaceRaised 5.1).
+- **Floating UI over the world** (HUD badges, settings/edit buttons, removal prompt, dev
+  inventory) uses `floatingSurface(c)` - never assume the background is dark.
+- **The Screen Time shield is not themed** - it's configured once natively
+  (`deviceActivityBridge.ts`'s `configureShield`) and can't follow the app's theme.
+- `app.json`'s `userInterfaceStyle` must stay `"automatic"` - `"light"` pins the whole app
+  at the Info.plist level, so dark/system wouldn't reach native UI.
 
 Rendering:
 

@@ -1,8 +1,9 @@
-import { Pressable, StyleSheet, Text } from "react-native";
+import { Pressable, Text } from "react-native";
 import Animated, { useAnimatedStyle } from "react-native-reanimated";
 
 import { toScreenPoint, type EntityProps } from "../entitySprite";
 import type { SceneryGroup } from "../scene";
+import { floatingSurface, makeStyles } from "../../ui/theme";
 
 const BUTTON_WIDTH = 120;
 
@@ -37,6 +38,7 @@ export const SceneryRemovalPrompt = ({
 }: Props) => {
   // Anchored at the top-centre of the group's bounding box, in room pixels -
   // computed once per selection, not per frame (the box itself doesn't move).
+  const styles = useStyles();
   const anchorX = (group.bounds.minX + group.bounds.maxX) / 2;
   const anchorY = group.bounds.minY;
 
@@ -66,7 +68,7 @@ export const SceneryRemovalPrompt = ({
   );
 };
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((c) => ({
   root: {
     position: "absolute",
     left: 0,
@@ -78,14 +80,14 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 10,
     borderRadius: 8,
-    backgroundColor: "#000000cc",
+    ...floatingSurface(c),
   },
   buttonDisabled: {
-    backgroundColor: "#00000088",
+    opacity: 0.55,
   },
   text: {
-    color: "#ffd978",
+    color: c.coin,
     fontSize: 12,
     fontWeight: "600",
   },
-});
+}));

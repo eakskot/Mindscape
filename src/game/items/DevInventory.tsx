@@ -2,9 +2,9 @@ import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { strings } from "../../ui/strings";
-import { theme } from "../../ui/TabBar/theme";
 import { type ItemId, unlockedItems } from "./itemCatalog";
 import type { EditMode } from "./editMode";
+import { floatingSurface, makeStyles } from "../../ui/theme";
 
 /**
  * Throwaway test UI, not the shop. It exists to exercise the item system:
@@ -46,6 +46,7 @@ export const DevInventory = ({
   onDone,
 }: DevInventoryProps) => {
   const [open, setOpen] = useState(false);
+  const styles = useStyles();
   const items = unlockedItems();
 
   /** Tapping an already-active mode button turns it back off. */
@@ -85,7 +86,7 @@ export const DevInventory = ({
           style={[styles.button, editMode === "move" && styles.buttonMoveActive]}
           onPress={() => toggle("move")}
         >
-          <Text style={styles.buttonText}>
+          <Text style={[styles.buttonText, editMode === "move" && styles.buttonTextMoveActive]}>
             {editMode === "move" ? "Moving" : "Move"}
           </Text>
         </Pressable>
@@ -93,7 +94,7 @@ export const DevInventory = ({
           style={[styles.button, editMode === "delete" && styles.buttonActive]}
           onPress={() => toggle("delete")}
         >
-          <Text style={styles.buttonText}>
+          <Text style={[styles.buttonText, editMode === "delete" && styles.buttonTextActive]}>
             {editMode === "delete" ? "Deleting" : "Delete"}
           </Text>
         </Pressable>
@@ -113,7 +114,7 @@ export const DevInventory = ({
   );
 };
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((c) => ({
   root: {
     position: "absolute",
     top: 0,
@@ -131,10 +132,10 @@ const styles = StyleSheet.create({
     padding: 10,
     maxHeight: 280,
     borderRadius: 8,
-    backgroundColor: "#000000cc",
+    ...floatingSurface(c),
   },
   heading: {
-    color: "#ffd978",
+    color: c.coin,
     fontSize: 12,
     marginBottom: 6,
   },
@@ -144,14 +145,14 @@ const styles = StyleSheet.create({
   row: {
     paddingVertical: 7,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#ffffff22",
+    borderBottomColor: c.divider,
   },
   rowText: {
-    color: "#ffffff",
+    color: c.textPrimary,
     fontSize: 14,
   },
   rowMeta: {
-    color: "#ffffff77",
+    color: c.textSecondary,
     fontSize: 10,
   },
   buttons: {
@@ -164,29 +165,35 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderRadius: 8,
-    backgroundColor: "#000000cc",
+    ...floatingSurface(c),
   },
   buttonActive: {
-    backgroundColor: "#a33",
+    backgroundColor: c.dangerSolid,
   },
   buttonMoveActive: {
     // The same yellow the in-world drag highlight uses (see
     // DragHighlight.tsx), so the button and the glow read as one idea.
-    backgroundColor: "#c9971f",
+    backgroundColor: c.warning,
   },
   spacer: {
     flex: 1,
   },
   doneButton: {
-    backgroundColor: theme.colors.accent,
+    backgroundColor: c.accent,
   },
   doneText: {
-    color: theme.colors.playIcon,
+    color: c.accentText,
     fontSize: 13,
     fontWeight: "700",
   },
   buttonText: {
-    color: "#ffffff",
+    color: c.textPrimary,
     fontSize: 13,
   },
-});
+  buttonTextActive: {
+    color: c.onSolid,
+  },
+  buttonTextMoveActive: {
+    color: c.warningText,
+  },
+}));

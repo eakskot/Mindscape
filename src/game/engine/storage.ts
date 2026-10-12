@@ -40,4 +40,5 @@ export const StorageKeys = {
   wallet: "wallet",
   walletLedger: "walletLedger",
   removedScenery: "removedScenery",
+  themePreference: "themePreference",
 } as const;

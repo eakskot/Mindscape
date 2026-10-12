@@ -11,13 +11,7 @@ import { useTabBarHeight } from "../../ui/TabBar/TabBar";
 import { useCountdown } from "../../ui/useCountdown";
 import { useEngine } from "./EngineProvider";
 import type { EngineStatus } from "./types";
-
-/** Colors with no token in theme.ts yet - one object so a future theme system can absorb them. */
-const localColors = {
-  coin: "#ffd978",
-  cardBorder: "rgba(255, 255, 255, 0.10)",
-  progressTrack: "rgba(255, 255, 255, 0.12)",
-};
+import { makeStyles, useTheme } from "../../ui/theme";
 
 /** Gap between the card and the tab bar (incl. the Focus button's overhang). */
 const GAP_ABOVE_TAB_BAR = 10;
@@ -77,6 +71,8 @@ export function TodayCard({ balance, visible }: TodayCardProps) {
   }, [watchTarget, remaining, engine]);
 
   const tabBarHeight = useTabBarHeight();
+  const { palette } = useTheme();
+  const styles = useStyles();
   const goal = useMemo(() => nextGoal(balance), [balance]);
 
   if (!visible) return null;
@@ -99,7 +95,7 @@ export function TodayCard({ balance, visible }: TodayCardProps) {
           accessibilityRole="button"
           accessibilityLabel={main.text}
         >
-          <Feather name={main.icon} size={16} color={theme.colors.accent} />
+          <Feather name={main.icon} size={16} color={palette.accent} />
           <Text style={styles.mainText} numberOfLines={1}>
             {main.text}
           </Text>
@@ -108,7 +104,7 @@ export function TodayCard({ balance, visible }: TodayCardProps) {
               <Text style={styles.actionText}>{main.action}</Text>
             </View>
           ) : (
-            <Feather name="chevron-right" size={16} color={theme.colors.textSecondary} />
+            <Feather name="chevron-right" size={16} color={palette.textSecondary} />
           )}
         </Pressable>
 
@@ -188,7 +184,7 @@ function mainLine(
   }
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((c) => ({
   wrapper: {
     position: "absolute",
     left: 12,
@@ -196,10 +192,10 @@ const styles = StyleSheet.create({
   },
   card: {
     borderRadius: theme.radii.card,
-    backgroundColor: theme.colors.cardBackground,
+    backgroundColor: c.surfaceRaised,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: localColors.cardBorder,
-    shadowColor: "#000",
+    borderColor: c.floatingBorder,
+    shadowColor: c.shadow,
     shadowOpacity: 0.35,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
@@ -215,7 +211,7 @@ const styles = StyleSheet.create({
   },
   mainText: {
     flex: 1,
-    color: theme.colors.textPrimary,
+    color: c.textPrimary,
     fontSize: 15,
     fontWeight: "600",
     fontVariant: ["tabular-nums"],
@@ -224,10 +220,10 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     paddingHorizontal: 12,
     borderRadius: theme.radii.chip,
-    backgroundColor: theme.colors.accent,
+    backgroundColor: c.accent,
   },
   actionText: {
-    color: theme.colors.playIcon,
+    color: c.accentText,
     fontSize: 13,
     fontWeight: "700",
   },
@@ -237,10 +233,10 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: theme.colors.divider,
+    borderTopColor: c.divider,
   },
   goalText: {
-    color: localColors.coin,
+    color: c.coin,
     fontSize: 12,
     fontWeight: "500",
     fontVariant: ["tabular-nums"],
@@ -248,12 +244,12 @@ const styles = StyleSheet.create({
   progressTrack: {
     height: 3,
     borderRadius: 2,
-    backgroundColor: localColors.progressTrack,
+    backgroundColor: c.border,
     overflow: "hidden",
   },
   progressFill: {
     height: 3,
     borderRadius: 2,
-    backgroundColor: localColors.coin,
+    backgroundColor: c.coin,
   },
-});
+}));

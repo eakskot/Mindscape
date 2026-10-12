@@ -9,6 +9,7 @@ import { HoldToConfirm } from "../src/ui/HoldToConfirm";
 import { theme } from "../src/ui/TabBar/theme";
 import { useCountdown } from "../src/ui/useCountdown";
 import { formatMMSS } from "../src/ui/formatDuration";
+import { makeStyles, useTheme } from "../src/ui/theme";
 
 /**
  * Deep link `mindscape://tickets`. Three ticket cards, a hold-to-confirm
@@ -18,6 +19,8 @@ import { formatMMSS } from "../src/ui/formatDuration";
  */
 export default function TicketsScreen() {
   const insets = useSafeAreaInsets();
+  const { palette } = useTheme();
+  const styles = useStyles();
   const engine = useEngine();
   const { state, status, config } = engine;
 
@@ -57,7 +60,7 @@ export default function TicketsScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Tickets</Text>
         <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Feather name="x" size={22} color={theme.colors.textPrimary} />
+          <Feather name="x" size={22} color={palette.textPrimary} />
         </Pressable>
       </View>
 
@@ -75,7 +78,7 @@ export default function TicketsScreen() {
                   <Feather
                     name={used ? "check" : "circle"}
                     size={16}
-                    color={used ? theme.colors.textDisabled : theme.colors.accent}
+                    color={used ? palette.textDisabled : palette.accent}
                   />
                 </View>
               );
@@ -132,7 +135,7 @@ export default function TicketsScreen() {
                 label={`Hold ${config.EMERGENCY_HOLD_S}s to confirm`}
                 holdSeconds={config.EMERGENCY_HOLD_S}
                 onConfirm={engine.startEmergency}
-                color={theme.colors.danger}
+                color={palette.danger}
               />
             </View>
           )}
@@ -142,10 +145,10 @@ export default function TicketsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((c) => ({
   root: {
     flex: 1,
-    backgroundColor: theme.colors.modalBackground,
+    backgroundColor: c.modalBg,
     paddingHorizontal: 20,
   },
   header: {
@@ -155,12 +158,12 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   title: {
-    color: theme.colors.textPrimary,
+    color: c.textPrimary,
     fontSize: 20,
     fontWeight: "700",
   },
   body: {
-    color: theme.colors.textSecondary,
+    color: c.textSecondary,
     fontSize: 14,
     lineHeight: 20,
   },
@@ -177,15 +180,15 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   pipAvailable: {
-    backgroundColor: theme.colors.cardBackground,
+    backgroundColor: c.surfaceRaised,
   },
   pipUsed: {
-    backgroundColor: theme.colors.screenBackground,
+    backgroundColor: c.bg,
     borderWidth: 1,
-    borderColor: theme.colors.divider,
+    borderColor: c.divider,
   },
   statusText: {
-    color: theme.colors.textSecondary,
+    color: c.textSecondary,
     fontSize: 15,
     marginBottom: 16,
   },
@@ -193,11 +196,11 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: theme.radii.chip,
     borderWidth: 1,
-    borderColor: theme.colors.divider,
+    borderColor: c.divider,
     alignItems: "center",
   },
   secondaryButtonText: {
-    color: theme.colors.textSecondary,
+    color: c.textSecondary,
     fontSize: 15,
     fontWeight: "600",
   },
@@ -205,17 +208,17 @@ const styles = StyleSheet.create({
     marginTop: 32,
     paddingTop: 20,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: theme.colors.divider,
+    borderTopColor: c.divider,
     gap: 12,
   },
   emergencyTitle: {
-    color: theme.colors.danger,
+    color: c.danger,
     fontSize: 15,
     fontWeight: "700",
   },
   emergencyBody: {
-    color: theme.colors.textSecondary,
+    color: c.textSecondary,
     fontSize: 13,
     lineHeight: 18,
   },
-});
+}));

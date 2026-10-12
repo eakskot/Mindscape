@@ -8,6 +8,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { WalletProvider } from "../src/game/economy/WalletContext";
 import { EngineProvider } from "../src/game/engine/EngineProvider";
 import { ensureNotificationPermission, useNotificationTapNavigation } from "../src/game/engine/notifications";
+import { ThemeProvider, useTheme } from "../src/ui/theme";
 
 // Reanimated's "strict mode" logger (default on since Reanimated 3.16) warns
 // on any `.value` read outside a worklet/useDerivedValue/event-handler - a
@@ -61,20 +62,44 @@ export default function RootLayout() {
     // library's own docs show, so it's never inside anything that could
     // clip its native view.
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        <WalletProvider>
-          <EngineProvider>
-            <StatusBar style="light" />
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="(tabs)" />
-              <Stack.Screen name="focus" options={{ presentation: "modal" }} />
-              <Stack.Screen name="settings" options={{ presentation: "modal" }} />
-              <Stack.Screen name="tickets" options={{ presentation: "modal" }} />
-              <Stack.Screen name="summary" options={{ presentation: "modal" }} />
-            </Stack>
-          </EngineProvider>
-        </WalletProvider>
-      </SafeAreaProvider>
+      {/*
+        Above everything that draws UI - hydrates the light/dark preference
+        synchronously so the first frame already has the right palette. See
+        src/ui/theme/ThemeProvider.tsx.
+      */}
+      <ThemeProvider>
+        <SafeAreaProvider>
+          <WalletProvider>
+            <EngineProvider>
+              <ThemedStack />
+            </EngineProvider>
+          </WalletProvider>
+        </SafeAreaProvider>
+      </ThemeProvider>
     </GestureHandlerRootView>
+  );
+}
+
+/** The root Stack + status bar, colored from the active palette (needs to sit inside ThemeProvider). */
+function ThemedStack() {
+  const { palette, scheme } = useTheme();
+  return (
+    <>
+      <StatusBar style={scheme === "dark" ? "light" : "dark"} />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: palette.bg },
+          headerStyle: { backgroundColor: palette.surface },
+          headerTintColor: palette.textPrimary,
+        }}
+      >
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="focus" options={{ presentation: "modal", contentStyle: { backgroundColor: palette.modalBg } }} />
+        <Stack.Screen name="settings" options={{ presentation: "modal", contentStyle: { backgroundColor: palette.modalBg } }} />
+        <Stack.Screen name="tickets" options={{ presentation: "modal", contentStyle: { backgroundColor: palette.modalBg } }} />
+        <Stack.Screen name="summary" options={{ presentation: "modal", contentStyle: { backgroundColor: palette.modalBg } }} />
+      </Stack>
+    </>
   );
 }

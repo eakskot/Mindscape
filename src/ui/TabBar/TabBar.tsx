@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { TAB_BAR_ENTRIES, type ActionEntry, type TabEntry } from "./tabs.config";
 import { theme } from "./theme";
+import { makeStyles, useTheme } from "../theme";
 
 /**
  * The exact slice of @react-navigation/bottom-tabs' `BottomTabBarProps` this
@@ -85,6 +86,7 @@ const BAR_PADDING_TOP = 8;
 
 export function TabBar({ state, navigation }: TabBarProps) {
   const bottomPadding = useBarBottomPadding();
+  const styles = useStyles();
 
   return (
     <View style={styles.wrapper} pointerEvents="box-none">
@@ -135,6 +137,8 @@ function TabButton({
   focused: boolean;
   onPress: () => void;
 }) {
+  const { palette } = useTheme();
+  const styles = useStyles();
   // 0 -> 1 as a tab becomes active. Drives the active icon's crossfade, the
   // label color and the accent underline together, all off one value.
   const progress = useSharedValue(focused ? 1 : 0);
@@ -165,9 +169,9 @@ function TabButton({
       hitSlop={6}
     >
       <View style={styles.iconStack}>
-        <Feather name={entry.icon} size={theme.sizes.iconSize} color={theme.colors.iconInactive} />
+        <Feather name={entry.icon} size={theme.sizes.iconSize} color={palette.tabBarInactive} />
         <Animated.View style={[StyleSheet.absoluteFill, activeIconStyle]}>
-          <Feather name={entry.icon} size={theme.sizes.iconSize} color={theme.colors.iconActive} />
+          <Feather name={entry.icon} size={theme.sizes.iconSize} color={palette.tabBarActive} />
         </Animated.View>
       </View>
       <Animated.Text style={[styles.label, labelStyle, focused && styles.labelActive]}>
@@ -179,6 +183,8 @@ function TabButton({
 }
 
 function FocusButton({ entry }: { entry: ActionEntry }) {
+  const { palette } = useTheme();
+  const styles = useStyles();
   const scale = useSharedValue(1);
   const pressStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 
@@ -207,14 +213,14 @@ function FocusButton({ entry }: { entry: ActionEntry }) {
         style={styles.playTouchTarget}
       >
         <Animated.View style={[styles.playButton, pressStyle]}>
-          <Feather name={entry.icon} size={theme.sizes.playIconSize} color={theme.colors.playIcon} />
+          <Feather name={entry.icon} size={theme.sizes.playIconSize} color={palette.accentText} />
         </Animated.View>
       </Pressable>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((c) => ({
   wrapper: {
     position: "absolute",
     left: 0,
@@ -231,11 +237,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     paddingTop: BAR_PADDING_TOP,
-    backgroundColor: theme.colors.barBackground,
+    backgroundColor: c.tabBarBg,
     borderTopLeftRadius: theme.radii.barTop,
     borderTopRightRadius: theme.radii.barTop,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.barBorder,
+    borderColor: c.tabBarBorder,
   },
   tabButton: {
     flex: 1,
@@ -248,10 +254,10 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: theme.sizes.labelSize,
-    color: theme.colors.labelInactive,
+    color: c.tabBarInactive,
   },
   labelActive: {
-    color: theme.colors.labelActive,
+    color: c.tabBarActive,
     fontWeight: "600",
   },
   accentUnderline: {
@@ -259,7 +265,7 @@ const styles = StyleSheet.create({
     width: 14,
     height: 3,
     borderRadius: 2,
-    backgroundColor: theme.colors.accent,
+    backgroundColor: c.accent,
   },
   actionSlot: {
     flex: 1,
@@ -274,13 +280,13 @@ const styles = StyleSheet.create({
     height: theme.sizes.playButtonSize,
     borderRadius: theme.radii.playButton,
     marginTop: -theme.sizes.playButtonLift,
-    backgroundColor: theme.colors.accent,
+    backgroundColor: c.accent,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: theme.colors.accent,
+    shadowColor: c.accent,
     shadowOpacity: 0.6,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 4 },
     elevation: 8,
   },
-});
+}));

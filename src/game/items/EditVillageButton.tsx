@@ -1,8 +1,8 @@
 import { Feather } from "@expo/vector-icons";
-import { Pressable, StyleSheet } from "react-native";
+import { Pressable } from "react-native";
 
 import { strings } from "../../ui/strings";
-import { theme } from "../../ui/TabBar/theme";
+import { floatingSurface, makeStyles, useTheme } from "../../ui/theme";
 
 /**
  * The pencil that enters village edit mode (shows DevInventory's toolbar -
@@ -10,19 +10,23 @@ import { theme } from "../../ui/TabBar/theme";
  * look, so the top-right column reads as "status row, settings, edit".
  * Hidden while editing - the toolbar's own "Done" is the way back out.
  */
-export const EditVillageButton = ({ onPress }: { onPress: () => void }) => (
-  <Pressable
-    style={styles.root}
-    onPress={onPress}
-    hitSlop={8}
-    accessibilityRole="button"
-    accessibilityLabel={strings.edit.editVillage}
-  >
-    <Feather name="edit-2" size={16} color={theme.colors.textPrimary} />
-  </Pressable>
-);
+export const EditVillageButton = ({ onPress }: { onPress: () => void }) => {
+  const { palette } = useTheme();
+  const styles = useStyles();
+  return (
+    <Pressable
+      style={styles.root}
+      onPress={onPress}
+      hitSlop={8}
+      accessibilityRole="button"
+      accessibilityLabel={strings.edit.editVillage}
+    >
+      <Feather name="edit-2" size={16} color={palette.textPrimary} />
+    </Pressable>
+  );
+};
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((c) => ({
   root: {
     position: "absolute",
     // SettingsButton sits at `top: 100` with a 32pt height - this clears it
@@ -32,8 +36,8 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "#000000cc",
+    ...floatingSurface(c),
     alignItems: "center",
     justifyContent: "center",
   },
-});
+}));

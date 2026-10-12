@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, Text } from "react-native";
+import { Pressable, Text } from "react-native";
 import { DeviceActivitySelectionSheetViewPersisted } from "react-native-device-activity";
 
 import { BRAINROT_SELECTION_ID } from "../engine/config";
+import { makeStyles } from "../../ui/theme";
 
 /**
  * Lets the user choose which 1-3 "brainrot" apps get locked once the engine
@@ -28,6 +29,7 @@ import { BRAINROT_SELECTION_ID } from "../engine/config";
  */
 export function BrainrotAppPicker() {
   const [pickerVisible, setPickerVisible] = useState(false);
+  const styles = useStyles();
 
   return (
     <>
@@ -49,15 +51,15 @@ export function BrainrotAppPicker() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((c) => ({
   button: {
     paddingVertical: 14,
     borderRadius: 12,
-    backgroundColor: "#3DDC73",
+    backgroundColor: c.accent,
     alignItems: "center",
   },
   buttonText: {
-    color: "#0F1115",
+    color: c.accentText,
     fontSize: 15,
     fontWeight: "600",
   },
@@ -68,4 +70,4 @@ const styles = StyleSheet.create({
     height: 1,
     position: "absolute",
   },
-});
+}));

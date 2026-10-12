@@ -9,6 +9,7 @@ import { formatMMSS } from "../../ui/formatDuration";
 import { useCountdown } from "../../ui/useCountdown";
 import { BrainrotAppPicker } from "./BrainrotAppPicker";
 import { useAuthorization } from "./useAuthorization";
+import { makeStyles, useTheme } from "../../ui/theme";
 
 /**
  * The real Screen Time tab: setup (authorize -> pick apps -> Activate) when
@@ -18,6 +19,7 @@ import { useAuthorization } from "./useAuthorization";
  */
 export default function ScreenTimeScreen() {
   const insets = useSafeAreaInsets();
+  const styles = useStyles();
   const auth = useAuthorization();
   const engine = useEngine();
 
@@ -55,6 +57,7 @@ export default function ScreenTimeScreen() {
 }
 
 function SetupFlow({ auth }: { auth: ReturnType<typeof useAuthorization> }) {
+  const styles = useStyles();
   const engine = useEngine();
   return (
     <View style={styles.section}>
@@ -94,6 +97,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 function Dashboard() {
+  const styles = useStyles();
   const engine = useEngine();
   const { state, status, config } = engine;
 
@@ -159,6 +163,8 @@ function Dashboard() {
 }
 
 function DeveloperSection() {
+  const { palette } = useTheme();
+  const styles = useStyles();
   const engine = useEngine();
   const wallet = useWalletContext();
 
@@ -171,7 +177,7 @@ function DeveloperSection() {
         <Switch
           value={engine.state.fastMode}
           onValueChange={engine.setFastMode}
-          trackColor={{ true: theme.colors.accent }}
+          trackColor={{ true: palette.accent }}
         />
       </View>
 
@@ -223,20 +229,20 @@ function DeveloperSection() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((c) => ({
   root: {
     flex: 1,
-    backgroundColor: theme.colors.screenBackground,
+    backgroundColor: c.bg,
     paddingHorizontal: 20,
   },
   title: {
-    color: theme.colors.textPrimary,
+    color: c.textPrimary,
     fontSize: 22,
     fontWeight: "700",
     marginBottom: 16,
   },
   body: {
-    color: theme.colors.textSecondary,
+    color: c.textSecondary,
     fontSize: 14,
     lineHeight: 20,
   },
@@ -244,26 +250,26 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   statusLine: {
-    color: theme.colors.textSecondary,
+    color: c.textSecondary,
     fontSize: 13,
     marginBottom: 16,
   },
   sectionLabel: {
-    color: theme.colors.textSecondary,
+    color: c.textSecondary,
     fontSize: 13,
     marginBottom: 8,
   },
   button: {
     paddingVertical: 14,
     borderRadius: theme.radii.chip,
-    backgroundColor: theme.colors.accent,
+    backgroundColor: c.accent,
     alignItems: "center",
   },
   dangerButton: {
-    backgroundColor: theme.colors.danger,
+    backgroundColor: c.danger,
   },
   buttonText: {
-    color: theme.colors.playIcon,
+    color: c.accentText,
     fontSize: 15,
     fontWeight: "600",
   },
@@ -271,11 +277,11 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: theme.radii.chip,
     borderWidth: 1,
-    borderColor: theme.colors.divider,
+    borderColor: c.divider,
     alignItems: "center",
   },
   secondaryButtonText: {
-    color: theme.colors.textSecondary,
+    color: c.textSecondary,
     fontSize: 14,
     fontWeight: "600",
   },
@@ -289,12 +295,12 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   statusBig: {
-    color: theme.colors.textPrimary,
+    color: c.textPrimary,
     fontSize: 24,
     fontWeight: "700",
   },
   statusCountdown: {
-    color: theme.colors.accent,
+    color: c.accent,
     fontSize: 20,
     fontWeight: "700",
     fontVariant: ["tabular-nums"],
@@ -311,18 +317,18 @@ const styles = StyleSheet.create({
     borderRadius: 7,
   },
   pipAvailable: {
-    backgroundColor: theme.colors.accent,
+    backgroundColor: c.accent,
   },
   pipUsed: {
-    backgroundColor: theme.colors.divider,
+    backgroundColor: c.divider,
   },
   pipsLabel: {
-    color: theme.colors.textSecondary,
+    color: c.textSecondary,
     fontSize: 13,
     marginLeft: 8,
   },
   streakLine: {
-    color: theme.colors.textPrimary,
+    color: c.textPrimary,
     fontSize: 15,
     marginBottom: 16,
   },
@@ -330,10 +336,10 @@ const styles = StyleSheet.create({
     marginTop: 12,
     paddingTop: 20,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: theme.colors.divider,
+    borderTopColor: c.divider,
   },
   devTitle: {
-    color: theme.colors.textSecondary,
+    color: c.textSecondary,
     fontSize: 13,
     fontWeight: "700",
     textTransform: "uppercase",
@@ -354,19 +360,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   logBox: {
-    backgroundColor: theme.colors.cardBackground,
+    backgroundColor: c.surfaceRaised,
     borderRadius: theme.radii.card,
     padding: 12,
     marginBottom: 8,
   },
   logEmpty: {
-    color: theme.colors.textDisabled,
+    color: c.textDisabled,
     fontSize: 12,
   },
   logLine: {
-    color: theme.colors.textSecondary,
+    color: c.textSecondary,
     fontSize: 12,
     marginBottom: 4,
     fontVariant: ["tabular-nums"],
   },
-});
+}));

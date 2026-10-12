@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import Animated, {
   cancelAnimation,
   runOnJS,
@@ -8,7 +8,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-import { theme } from "./TabBar/theme";
+import { makeStyles, useTheme } from "./theme";
 
 /**
  * A press-and-hold confirm button - used for starting a ticket (3s/15s,
@@ -27,8 +27,8 @@ export function HoldToConfirm({
   holdingLabel,
   holdSeconds,
   onConfirm,
-  color = theme.colors.accent,
-  textColor = theme.colors.playIcon,
+  color,
+  textColor,
   disabled = false,
 }: {
   label: string;
@@ -39,6 +39,12 @@ export function HoldToConfirm({
   textColor?: string;
   disabled?: boolean;
 }) {
+  const { palette } = useTheme();
+  const styles = useStyles();
+  const fillColor = color ?? palette.accent;
+  // Was `accentText` (dark-on-dark before the fill reached it, unreadable)
+  // - textPrimary reads on the resting surfaceRaised in both palettes.
+  const labelColor = textColor ?? palette.textPrimary;
   const progress = useSharedValue(0);
   const [holding, setHolding] = useState(false);
 
@@ -72,23 +78,23 @@ export function HoldToConfirm({
       style={[styles.button, disabled && styles.disabled]}
     >
       <View style={styles.track}>
-        <Animated.View style={[styles.fill, fillStyle, { backgroundColor: color }]} />
+        <Animated.View style={[styles.fill, fillStyle, { backgroundColor: fillColor }]} />
       </View>
-      <Text style={[styles.label, { color: textColor }]}>
+      <Text style={[styles.label, { color: labelColor }]}>
         {holding ? (holdingLabel ?? `Hold... (${holdSeconds}s)`) : label}
       </Text>
     </Pressable>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((c) => ({
   button: {
     height: 56,
     borderRadius: 16,
     overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: theme.colors.cardBackground,
+    backgroundColor: c.surfaceRaised,
   },
   disabled: {
     opacity: 0.4,
@@ -108,4 +114,4 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
   },
-});
+}));

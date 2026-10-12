@@ -1,4 +1,6 @@
-import { StyleSheet, Text, View } from "react-native";
+import { Text, View } from "react-native";
+
+import { floatingSurface, makeStyles } from "../../ui/theme";
 
 type CurrencyHudProps = {
   balance: number;
@@ -15,14 +17,17 @@ type CurrencyHudProps = {
  * positioned wrapper (`topRightRow`). Used to carry its own `top: 56,
  * right: 12`; that offset lives on the wrapper now.
  */
-export const CurrencyHud = ({ balance }: CurrencyHudProps) => (
-  <View style={styles.root} pointerEvents="none">
-    <Text style={styles.icon}>🪙</Text>
-    <Text style={styles.balance}>{balance}</Text>
-  </View>
-);
+export const CurrencyHud = ({ balance }: CurrencyHudProps) => {
+  const styles = useStyles();
+  return (
+    <View style={styles.root} pointerEvents="none">
+      <Text style={styles.icon}>🪙</Text>
+      <Text style={styles.balance}>{balance}</Text>
+    </View>
+  );
+};
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((c) => ({
   root: {
     flexDirection: "row",
     alignItems: "center",
@@ -30,14 +35,14 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderRadius: 8,
-    backgroundColor: "#000000cc",
+    ...floatingSurface(c),
   },
   icon: {
     fontSize: 14,
   },
   balance: {
-    color: "#ffd978",
+    color: c.coin,
     fontSize: 14,
     fontWeight: "600",
   },
-});
+}));

@@ -1,9 +1,10 @@
-import { FlatList, StyleSheet, Text, View } from "react-native";
+import { FlatList, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useWalletContext } from "../../src/game/economy/WalletContext";
 import { ALL_ITEMS, type ItemDefinition } from "../../src/game/items/itemCatalog";
 import { theme } from "../../src/ui/TabBar/theme";
+import { makeStyles } from "../../src/ui/theme";
 
 /**
  * Read-only for now - no purchasing. Reads straight from `itemCatalog`
@@ -15,6 +16,7 @@ import { theme } from "../../src/ui/TabBar/theme";
  */
 export default function ShopScreen() {
   const insets = useSafeAreaInsets();
+  const styles = useStyles();
   const wallet = useWalletContext();
 
   return (
@@ -40,6 +42,7 @@ export default function ShopScreen() {
 }
 
 function ShopItemCard({ item }: { item: ItemDefinition }) {
+  const styles = useStyles();
   return (
     <View style={[styles.card, !item.unlocked && styles.cardLocked]}>
       <Text style={styles.cardLabel}>{item.label}</Text>
@@ -50,10 +53,10 @@ function ShopItemCard({ item }: { item: ItemDefinition }) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((c) => ({
   root: {
     flex: 1,
-    backgroundColor: theme.colors.screenBackground,
+    backgroundColor: c.bg,
     paddingHorizontal: 20,
   },
   header: {
@@ -63,7 +66,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   title: {
-    color: theme.colors.textPrimary,
+    color: c.textPrimary,
     fontSize: 22,
     fontWeight: "700",
   },
@@ -74,13 +77,13 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderRadius: theme.radii.chip,
-    backgroundColor: theme.colors.cardBackground,
+    backgroundColor: c.surfaceRaised,
   },
   balanceIcon: {
     fontSize: 14,
   },
   balanceText: {
-    color: "#ffd978",
+    color: c.coin,
     fontSize: 14,
     fontWeight: "600",
   },
@@ -95,23 +98,23 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 12,
     borderRadius: theme.radii.card,
-    backgroundColor: theme.colors.cardBackground,
+    backgroundColor: c.surfaceRaised,
   },
   cardLocked: {
     opacity: 0.5,
   },
   cardLabel: {
-    color: theme.colors.textPrimary,
+    color: c.textPrimary,
     fontSize: 14,
     fontWeight: "600",
     marginBottom: 6,
   },
   cardUnlocked: {
-    color: theme.colors.accent,
+    color: c.accent,
     fontSize: 12,
   },
   cardLockedText: {
-    color: theme.colors.textDisabled,
+    color: c.textDisabled,
     fontSize: 12,
   },
-});
+}));

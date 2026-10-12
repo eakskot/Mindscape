@@ -1,13 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
-import { StyleSheet, Text, View } from "react-native";
+import { Text, View } from "react-native";
 
 import { strings } from "../../ui/strings";
-
-/** Colors with no token in theme.ts yet - kept local so a future theme system can absorb them. */
-const localColors = {
-  flame: "#ff9f43",
-  text: "#ffd9b0",
-};
+import { floatingSurface, makeStyles, useTheme } from "../../ui/theme";
 
 type StreakBadgeProps = {
   /** `EngineState.streak` - consecutive clean days, as `settleDay()` updates it. */
@@ -22,19 +17,23 @@ type StreakBadgeProps = {
  * - `pointerEvents="none"`, same as CurrencyHud, so it never steals a world
  * touch.
  */
-export const StreakBadge = ({ streak }: StreakBadgeProps) => (
-  <View
-    style={[styles.root, streak === 0 && styles.dimmed]}
-    pointerEvents="none"
-    accessible
-    accessibilityLabel={strings.streak.accessibility(streak)}
-  >
-    <Ionicons name="flame" size={14} color={localColors.flame} />
-    <Text style={styles.count}>{streak}</Text>
-  </View>
-);
+export const StreakBadge = ({ streak }: StreakBadgeProps) => {
+  const { palette } = useTheme();
+  const styles = useStyles();
+  return (
+    <View
+      style={[styles.root, streak === 0 && styles.dimmed]}
+      pointerEvents="none"
+      accessible
+      accessibilityLabel={strings.streak.accessibility(streak)}
+    >
+      <Ionicons name="flame" size={14} color={palette.streakFlame} />
+      <Text style={styles.count}>{streak}</Text>
+    </View>
+  );
+};
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((c) => ({
   root: {
     flexDirection: "row",
     alignItems: "center",
@@ -42,15 +41,15 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderRadius: 8,
-    backgroundColor: "#000000cc",
+    ...floatingSurface(c),
   },
   dimmed: {
     opacity: 0.5,
   },
   count: {
-    color: localColors.text,
+    color: c.streakText,
     fontSize: 14,
     fontWeight: "600",
     fontVariant: ["tabular-nums"],
   },
-});
+}));

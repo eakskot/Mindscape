@@ -1,13 +1,14 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useEngine } from "../src/game/engine/EngineProvider";
 import { formatMMSS } from "../src/ui/formatDuration";
 import { theme } from "../src/ui/TabBar/theme";
 import { useCountdown } from "../src/ui/useCountdown";
+import { makeStyles, useTheme } from "../src/ui/theme";
 
 /** How long the second "give up" tap stays armed before reverting - see `confirmingGiveUp` below. */
 const GIVE_UP_CONFIRM_WINDOW_MS = 3000;
@@ -33,6 +34,8 @@ const GIVE_UP_CONFIRM_WINDOW_MS = 3000;
  */
 export default function FocusScreen() {
   const insets = useSafeAreaInsets();
+  const { palette } = useTheme();
+  const styles = useStyles();
   const engine = useEngine();
   const { config, state } = engine;
 
@@ -94,7 +97,7 @@ export default function FocusScreen() {
           accessibilityRole="button"
           accessibilityLabel="Close"
         >
-          <Feather name="x" size={22} color={theme.colors.textPrimary} />
+          <Feather name="x" size={22} color={palette.textPrimary} />
         </Pressable>
       </View>
 
@@ -147,10 +150,10 @@ export default function FocusScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((c) => ({
   root: {
     flex: 1,
-    backgroundColor: theme.colors.modalBackground,
+    backgroundColor: c.modalBg,
     paddingHorizontal: 20,
   },
   header: {
@@ -160,17 +163,17 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   title: {
-    color: theme.colors.textPrimary,
+    color: c.textPrimary,
     fontSize: 20,
     fontWeight: "700",
   },
   body: {
-    color: theme.colors.textSecondary,
+    color: c.textSecondary,
     fontSize: 14,
     marginBottom: 16,
   },
   warning: {
-    color: theme.colors.danger,
+    color: c.danger,
     fontSize: 13,
     marginBottom: 16,
   },
@@ -183,28 +186,28 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 14,
     borderRadius: theme.radii.chip,
-    backgroundColor: theme.colors.cardBackground,
+    backgroundColor: c.surfaceRaised,
     alignItems: "center",
   },
   chipSelected: {
-    backgroundColor: theme.colors.accent,
+    backgroundColor: c.accent,
   },
   chipText: {
-    color: theme.colors.textSecondary,
+    color: c.textSecondary,
     fontSize: 15,
     fontWeight: "600",
   },
   chipTextSelected: {
-    color: theme.colors.playIcon,
+    color: c.accentText,
   },
   primaryButton: {
     paddingVertical: 16,
     borderRadius: theme.radii.chip,
-    backgroundColor: theme.colors.accent,
+    backgroundColor: c.accent,
     alignItems: "center",
   },
   primaryButtonText: {
-    color: theme.colors.playIcon,
+    color: c.accentText,
     fontSize: 16,
     fontWeight: "700",
   },
@@ -214,7 +217,7 @@ const styles = StyleSheet.create({
     marginBottom: 28,
   },
   countdown: {
-    color: theme.colors.textPrimary,
+    color: c.textPrimary,
     fontSize: 56,
     fontWeight: "700",
     fontVariant: ["tabular-nums"],
@@ -223,12 +226,12 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: theme.radii.chip,
     borderWidth: 1,
-    borderColor: theme.colors.divider,
+    borderColor: c.divider,
     alignItems: "center",
   },
   secondaryButtonText: {
-    color: theme.colors.textSecondary,
+    color: c.textSecondary,
     fontSize: 15,
     fontWeight: "600",
   },
-});
+}));

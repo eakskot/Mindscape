@@ -1,8 +1,9 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { Pressable, StyleSheet } from "react-native";
+import { Pressable } from "react-native";
 
 import { theme } from "./TabBar/theme";
+import { floatingSurface, makeStyles, useTheme } from "./theme";
 
 /**
  * The gear button on the Village screen, next to CurrencyHud - opens
@@ -10,19 +11,23 @@ import { theme } from "./TabBar/theme";
  * no tab of its own (see CLAUDE.md's tab bar section), this is its only
  * entry point today besides a future link from Profile.
  */
-export const SettingsButton = () => (
-  <Pressable
-    style={styles.root}
-    onPress={() => router.push("/settings")}
-    hitSlop={8}
-    accessibilityRole="button"
-    accessibilityLabel={theme.labels.settings}
-  >
-    <Feather name="settings" size={18} color={theme.colors.textPrimary} />
-  </Pressable>
-);
+export const SettingsButton = () => {
+  const { palette } = useTheme();
+  const styles = useStyles();
+  return (
+    <Pressable
+      style={styles.root}
+      onPress={() => router.push("/settings")}
+      hitSlop={8}
+      accessibilityRole="button"
+      accessibilityLabel={theme.labels.settings}
+    >
+      <Feather name="settings" size={18} color={palette.textPrimary} />
+    </Pressable>
+  );
+};
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((c) => ({
   root: {
     position: "absolute",
     // Stacked directly under CurrencyHud's badge (`top: 56` there - see
@@ -33,8 +38,8 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "#000000cc",
+    ...floatingSurface(c),
     alignItems: "center",
     justifyContent: "center",
   },
-});
+}));

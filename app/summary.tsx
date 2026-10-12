@@ -1,9 +1,10 @@
 import { router } from "expo-router";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useEngine } from "../src/game/engine/EngineProvider";
 import { theme } from "../src/ui/TabBar/theme";
+import { makeStyles } from "../src/ui/theme";
 
 /**
  * Pushed automatically by EngineProvider.tsx the moment a day-settlement
@@ -14,6 +15,7 @@ import { theme } from "../src/ui/TabBar/theme";
  */
 export default function SummaryScreen() {
   const insets = useSafeAreaInsets();
+  const styles = useStyles();
   const engine = useEngine();
   const summary = engine.state.pendingSummary;
 
@@ -69,29 +71,29 @@ export default function SummaryScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((c) => ({
   root: {
     flex: 1,
-    backgroundColor: theme.colors.modalBackground,
+    backgroundColor: c.modalBg,
     paddingHorizontal: 24,
   },
   heading: {
-    color: theme.colors.textSecondary,
+    color: c.textSecondary,
     fontSize: 15,
     marginBottom: 4,
   },
   total: {
-    color: theme.colors.accent,
+    color: c.accent,
     fontSize: 40,
     fontWeight: "800",
     marginBottom: 28,
   },
   body: {
-    color: theme.colors.textSecondary,
+    color: c.textSecondary,
     fontSize: 14,
   },
   breakdown: {
-    backgroundColor: theme.colors.cardBackground,
+    backgroundColor: c.surfaceRaised,
     borderRadius: theme.radii.card,
     padding: 16,
     marginBottom: 28,
@@ -102,23 +104,23 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   rowLabel: {
-    color: theme.colors.textSecondary,
+    color: c.textSecondary,
     fontSize: 14,
   },
   rowAmount: {
-    color: theme.colors.textPrimary,
+    color: c.textPrimary,
     fontSize: 14,
     fontWeight: "700",
   },
   button: {
     paddingVertical: 16,
     borderRadius: theme.radii.chip,
-    backgroundColor: theme.colors.accent,
+    backgroundColor: c.accent,
     alignItems: "center",
   },
   buttonText: {
-    color: theme.colors.playIcon,
+    color: c.accentText,
     fontSize: 16,
     fontWeight: "700",
   },
-});
+}));

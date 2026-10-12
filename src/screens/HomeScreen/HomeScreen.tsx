@@ -15,10 +15,13 @@ import { Character, NPC_SHEET, NPC_SHEET_2, NPC_SHEET_3 } from "../../game/Chara
 import { type DepthEntity, DepthSortedLayer } from "../../game/DepthSortedLayer";
 import { CurrencyHud } from "../../game/economy/CurrencyHud";
 import { useWalletContext } from "../../game/economy/WalletContext";
-import { TicketChip } from "../../game/engine/TicketChip";
+import { useEngine } from "../../game/engine/EngineProvider";
+import { StreakBadge } from "../../game/engine/StreakBadge";
+import { TodayCard } from "../../game/engine/TodayCard";
 import { getJSON, setJSON, StorageKeys } from "../../game/engine/storage";
 import { DevInventory } from "../../game/items/DevInventory";
 import { DragHighlight } from "../../game/items/DragHighlight";
+import { EditVillageButton } from "../../game/items/EditVillageButton";
 import type { EditMode } from "../../game/items/editMode";
 import { ItemLayer, ItemVisual } from "../../game/items/ItemLayer";
 import { ITEM_CATALOG } from "../../game/items/itemCatalog";
@@ -94,14 +97,22 @@ export default function HomeScreen() {
     spawn: VILLAGE.start,
   }));
 
+  // Whether the village is in edit mode (DevInventory's toolbar showing,
+  // TodayCard + pencil hidden). Owned here rather than in SceneStage since
+  // the overlay UI that reacts to it lives here too; the finer-grained
+  // move/delete `editMode` stays inside SceneStage with the gestures.
+  const [editing, setEditing] = useState(false);
+
   const handlePortal = useCallback((portal: Portal) => {
     setSceneState({ sceneId: portal.targetScene, spawn: portal.targetSpawn });
+    setEditing(false);
   }, []);
 
   // Lifted all the way above the tab navigator now (see WalletContext.tsx) -
   // owning it here would no longer survive switching to Shop or Screen time
   // and back. Same API as the old `useWallet()` call this replaced.
   const wallet = useWalletContext();
+  const engine = useEngine();
   // See the SettingsButton render below for why this exists.
   const isFocused = useIsFocused();
 
@@ -156,9 +167,11 @@ export default function HomeScreen() {
         walletBalance={wallet.balance}
         removedSceneryIds={removedSceneryIds}
         onRemoveScenery={tryRemoveScenery}
+        editing={editing}
+        onDoneEditing={() => setEditing(false)}
       />
       <View style={styles.topRightRow} pointerEvents="box-none">
-        <TicketChip />
+        <StreakBadge streak={engine.state.streak} />
         <CurrencyHud balance={wallet.balance} />
       </View>
       {/*
@@ -171,6 +184,13 @@ export default function HomeScreen() {
         chasing the library-internals root cause.
       */}
       {isFocused && <SettingsButton />}
+      {isFocused && !editing && <EditVillageButton onPress={() => setEditing(true)} />}
+      {/*
+        Always mounted (only `visible` toggles) - it's also the app's
+        always-on zero-countdown reconcile watcher, see TodayCard.tsx.
+        Focus-gated for the same Pressable bleed-through reason as above.
+      */}
+      <TodayCard balance={wallet.balance} visible={isFocused && !editing} />
     </View>
   );
 }
@@ -182,6 +202,8 @@ function SceneStage({
   walletBalance,
   removedSceneryIds,
   onRemoveScenery,
+  editing,
+  onDoneEditing,
 }: {
   sceneId: SceneId;
   spawn: { x: number; y: number };
@@ -190,6 +212,9 @@ function SceneStage({
   removedSceneryIds: Set<string>;
   /** Spends the currency and removes the group; false if the spend failed. */
   onRemoveScenery: (id: string) => boolean;
+  /** Edit mode on - see HomeScreen's `editing`. Gates DevInventory's toolbar. */
+  editing: boolean;
+  onDoneEditing: () => void;
 }) {
   const { width, height } = useWindowDimensions();
   const { scene, useImages } = SCENES[sceneId];
@@ -199,6 +224,11 @@ function SceneStage({
   const world = useWorldItems(scene.bounds, scene.tileSize, scene.placementMask);
 
   const [editMode, setEditMode] = useState<EditMode>("none");
+  // Leaving edit mode (however it happens) drops any move/delete mode too,
+  // so the world never stays frozen with no toolbar to unfreeze it.
+  useEffect(() => {
+    if (!editing) setEditMode("none");
+  }, [editing]);
   // Mirrors `editMode` into a shared value the movement/camera worklets can
   // read (a plain ref isn't safe to read on the UI thread). It's the "hold
   // still" signal for both the character (useCharacter's `frozen`) and the
@@ -514,17 +544,20 @@ function SceneStage({
         />
       )}
 
-      <DevInventory
-        // Drop new items at the centre of what's currently on screen.
-        onPlace={(itemId) => {
-          const { roomX, roomY } = camera.toRoomPoint(width / 2, height / 2);
-          world.placeItem(itemId, { x: roomX, y: roomY });
-        }}
-        onClear={world.clearItems}
-        editMode={editMode}
-        onSetEditMode={setEditMode}
-        placedCount={world.items.length}
-      />
+      {editing && (
+        <DevInventory
+          // Drop new items at the centre of what's currently on screen.
+          onPlace={(itemId) => {
+            const { roomX, roomY } = camera.toRoomPoint(width / 2, height / 2);
+            world.placeItem(itemId, { x: roomX, y: roomY });
+          }}
+          onClear={world.clearItems}
+          editMode={editMode}
+          onSetEditMode={setEditMode}
+          placedCount={world.items.length}
+          onDone={onDoneEditing}
+        />
+      )}
     </View>
   );
 }
@@ -545,9 +578,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#15151d",
   },
   // Replaces CurrencyHud's own former `position: absolute, top: 56, right:
-  // 12` - now the row wrapper owns that offset, with TicketChip alongside
-  // it (see engine/TicketChip.tsx). `box-none` so the gaps around the two
-  // chips (and between this row and SettingsButton below it) still let
+  // 12` - now the row wrapper owns that offset, with StreakBadge alongside
+  // it (see engine/StreakBadge.tsx). `box-none` so the gaps around the two
+  // badges (and between this row and SettingsButton below it) still let
   // world taps through.
   topRightRow: {
     position: "absolute",

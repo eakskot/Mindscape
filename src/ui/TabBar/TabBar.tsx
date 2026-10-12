@@ -57,9 +57,34 @@ type TabBarProps = {
  * touch responder system hands a touch to whichever view it hits first, so
  * it never reaches the world's PanResponder underneath.
  */
-export function TabBar({ state, navigation }: TabBarProps) {
+/** The bar's own bottom padding - the safe-area inset, with a floor for devices without one. */
+function useBarBottomPadding() {
   const insets = useSafeAreaInsets();
-  const bottomPadding = Math.max(insets.bottom, 12);
+  return Math.max(insets.bottom, 12);
+}
+
+/**
+ * How much of the screen's bottom edge the tab bar visually covers,
+ * including the Focus button's overhang above the bar's top edge
+ * (`playButtonLift` minus the bar's own `paddingTop`). The bar is
+ * absolutely positioned over the screen (see `styles.wrapper`), so anything
+ * a tab screen pins to its bottom (e.g. TodayCard) needs this as its offset.
+ * Computed from the same constants the bar draws with rather than measured,
+ * since `useBottomTabBarHeight` isn't reachable from this custom bar
+ * without depending on @react-navigation/bottom-tabs directly.
+ */
+export function useTabBarHeight() {
+  return (
+    theme.sizes.barHeight +
+    useBarBottomPadding() +
+    (theme.sizes.playButtonLift - BAR_PADDING_TOP)
+  );
+}
+
+const BAR_PADDING_TOP = 8;
+
+export function TabBar({ state, navigation }: TabBarProps) {
+  const bottomPadding = useBarBottomPadding();
 
   return (
     <View style={styles.wrapper} pointerEvents="box-none">
@@ -205,7 +230,7 @@ const styles = StyleSheet.create({
   bar: {
     flexDirection: "row",
     alignItems: "flex-start",
-    paddingTop: 8,
+    paddingTop: BAR_PADDING_TOP,
     backgroundColor: theme.colors.barBackground,
     borderTopLeftRadius: theme.radii.barTop,
     borderTopRightRadius: theme.radii.barTop,

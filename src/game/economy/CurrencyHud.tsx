@@ -11,7 +11,7 @@ type CurrencyHudProps = {
  * button - it must never steal a touch from the world view underneath it.
  *
  * Not positioned itself - HomeScreen.tsx places it in a row next to
- * `TicketChip` (see engine/TicketChip.tsx), both under one absolutely
+ * `StreakBadge` (see engine/StreakBadge.tsx), both under one absolutely
  * positioned wrapper (`topRightRow`). Used to carry its own `top: 56,
  * right: 12`; that offset lives on the wrapper now.
  */

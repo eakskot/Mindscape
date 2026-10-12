@@ -105,7 +105,7 @@ function Dashboard() {
     null;
   const remaining = useCountdown(countdownTarget);
 
-  // Same staleness fix as TicketChip.tsx/tickets.tsx: `status` only
+  // Same staleness fix as TodayCard.tsx/tickets.tsx: `status` only
   // recomputes when reconcile() runs, which a countdown reaching zero while
   // this screen sits open doesn't trigger by itself (confirmed on-device
   // 2026-10-07 - the Focus readout stuck at 0:00 here specifically, since

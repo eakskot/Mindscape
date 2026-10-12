@@ -34,7 +34,17 @@ ways. What's in:
   the tile scale (`entityScale = worldScale x 2`) so proportions never shift.
 - **Decorate**: a throwaway **dev inventory** with a Move/Delete edit mode. Dragging
   validates against ground layers and against every other item (never overlap), shows a
-  yellow/red highlight, freezes the characters + camera meanwhile.
+  yellow/red highlight, freezes the characters + camera meanwhile. Its toolbar (Items/Move/
+  Delete/Clear + "Done") only shows in **village edit mode**, entered via the pencil
+  (`EditVillageButton`) under the settings gear (2026-10-12, `feat/home-today`).
+- **Village = home, with a Today card** (2026-10-12, `feat/home-today`): the village stays
+  the home screen, but it must answer "what's my status?" and "what's my next step?" within
+  two seconds. `engine/TodayCard.tsx` sits above the tab bar: one line of engine state + one
+  primary action (Set up / Use a ticket / tap through to `/tickets` or `/focus`), plus one
+  goal line from the economy (`economy/nextGoal.ts`: "You can afford X" or "Next goal: X ·
+  n/price" -> Shop). Top-right row is now `StreakBadge` + `CurrencyHud`. **No detailed
+  metrics on the home screen** (time saved, weekly charts) - those belong on Profile. User
+  copy for this overlay lives in `src/ui/strings.ts`.
 - **Scenery** (trees/rocks/bushes): free-standing, Y-sorted against the character and
   placed items - so you walk *behind* a tree top and *in front* of its trunk. Batched into
   per-map-row bands for performance (see Design decisions).
@@ -193,7 +203,9 @@ un-picked when these land.
      foreground.** `engine.status` only recomputes when `reconcile()` runs (startup,
      `AppState` "active", an action) - a countdown reaching zero triggers none of those.
      Fixed in three places, each guarded by a ref so it fires once per window:
-     `TicketChip.tsx` (always mounted, since bottom-tabs keeps the Village screen alive),
+     `TodayCard.tsx` (always mounted - it only hides via its `visible` prop, never
+     unmounts, since bottom-tabs keeps the Village screen alive; replaced the old
+     `TicketChip.tsx` 2026-10-12, which held this watcher before),
      `tickets.tsx`, and `ScreenTimeScreen.tsx`'s `Dashboard` (found a day later than the
      other two - its own Focus countdown had the same gap). `focus.tsx` already did the
      same. Any new screen that shows an engine countdown and reads `status` needs this too.
@@ -526,8 +538,9 @@ everything reusable; `src/ui/` holds navigation chrome that isn't the world.
 |---|---|
 | `TabBar/tabs.config.ts` | The bottom bar's content, left to right, as one array (`kind: 'tab' \| 'action'`) - `TabBar.tsx` and `(tabs)/_layout.tsx` both derive from it. Add a tab here + its route file, nothing else to touch. |
 | `TabBar/theme.ts` | Every color/radius/size/label constant the tab bar (and Focus/Shop/Screen time/Profile/Settings) draws from. |
-| `TabBar/TabBar.tsx` | The custom `tabBar`. Crossfades two stacked Feather icons (grey/white) rather than animating the glyph's own `color` prop - robust regardless of how `@expo/vector-icons` merges an animated style internally. The center Focus button is a flex spacer with an absolutely-positioned circle poking up out of it (`playButtonLift`), so it keeps the bar's 5 equal slots while floating above the bar's top edge. |
+| `TabBar/TabBar.tsx` | The custom `tabBar`. Also exports `useTabBarHeight()` (bar + safe area + the Focus button's overhang) for anything a tab screen pins above the bar - the bar is absolutely positioned over the screen. Crossfades two stacked Feather icons (grey/white) rather than animating the glyph's own `color` prop - robust regardless of how `@expo/vector-icons` merges an animated style internally. The center Focus button is a flex spacer with an absolutely-positioned circle poking up out of it (`playButtonLift`), so it keeps the bar's 5 equal slots while floating above the bar's top edge. |
 | `SettingsButton.tsx` | The Village screen's gear button → `/settings`. Gated on `useIsFocused()` in HomeScreen.tsx - bottom-tabs' hiding of an unfocused screen didn't fully clip this `Pressable`'s native view without it (plain `View`s like `CurrencyHud` weren't affected). |
+| `strings.ts` | User-facing copy for the Village overlay (TodayCard, StreakBadge, edit controls). |
 | `HoldToConfirm.tsx` | The press-and-hold confirm button (ticket start, emergency valve). Progress indicator is a plain bottom-up-filling `View` clipped by a rounded parent, not an SVG ring - no `react-native-svg` dependency (would mean another native rebuild, and the phone was away for testing when this was built) - swap for a true ring later, purely visual, without touching the hold logic. |
 | `formatDuration.ts` | `formatMMSS(ms)` - every countdown in the app (tickets, Focus, the Screen time dashboard) formats the same way. |
 | `useCountdown.ts` | `useCountdown(endsAt)` - live ms-remaining, ticking once a second, `null` when there's nothing to count down to. Used anywhere a timestamp needs to become a live display. |
@@ -565,14 +578,16 @@ everything reusable; `src/ui/` holds navigation chrome that isn't the world.
 | `economy/WalletContext.tsx` | `WalletProvider`/`useWalletContext()` - lifts the wallet above the navigator (survives a tab switch) and persists it (`engine/storage.ts`), hydrated synchronously before first render. |
 | `economy/economyConfig.ts` | Every coin amount (`ECONOMY`) and the Shop's prices (`SHOP_PRICES`) - the one place to tune the economy. |
 | `economy/settleDay.ts` | `settleDay()` - pure, no wallet/storage access: one day's engine summary in, `{totalCoins, newStreak, breakdown}` out. Called from `engineLogic.ts`'s `reconcile()`. |
-| `economy/CurrencyHud.tsx` | The balance badge - presentational only, sits in `HomeScreen.tsx`'s `topRightRow` next to `engine/TicketChip.tsx`, not positioned itself. |
+| `economy/CurrencyHud.tsx` | The balance badge - presentational only, sits in `HomeScreen.tsx`'s `topRightRow` next to `engine/StreakBadge.tsx`, not positioned itself. |
+| `economy/nextGoal.ts` | `nextGoal(balance, owned?)` - pure: the most expensive affordable unowned item, else the cheapest unowned one, from `SHOP_PRICES` + the catalog. `owned` is empty until purchasing lands. |
 | `engine/types.ts` | `EngineState`/`EngineStatus`/`EngineEffect`/`EngineResult` - **read this first** for the ticket engine, same role `scene.ts` plays for the world. |
 | `engine/config.ts` | Every engine constant, normal + "fast test mode" (`configFor(fastMode)`), plus `BRAINROT_SELECTION_ID` and the reblock-schedule constants. |
 | `engine/storage.ts` | `getJSON`/`setJSON` over the library's `userDefaultsSet/Get` - what `WalletContext`, `EngineProvider` and `HomeScreen.tsx`'s removed-scenery state all persist through. |
 | `engine/engineLogic.ts` | The whole ticket engine's rules as pure functions (`arm`, `disarm`, `startTicket`, `endTicketEarly`, `startEmergency`, `startFocus`, `giveUpFocus`, `reconcile`) - **no native calls, no storage** - see "Where this is going" #3. `dayKeyFor()` is the 04:00-rollover day-key function. |
 | `engine/deviceActivityBridge.ts` | The *only* file that calls the library's blocking/scheduling/shield APIs (`blockAll`, `unblockAll`, `scheduleReblock`, `cancelReblock`, `configureShield`, `isShieldActive`) - everything else goes through `EngineEffect`s. |
 | `engine/EngineProvider.tsx` | `EngineProvider`/`useEngine()` - runs a pure result's effects through the bridge + wallet, persists state, runs `reconcile()` at startup/on `AppState` "active", exposes the Developer-section dev tools (`forceReconcile`, `resetDay`, `unblockEverything`, `setFastMode`) and `dismissSummary()`. |
-| `engine/TicketChip.tsx` | Sits next to `CurrencyHud` on the Village screen - "N left", a live countdown during a ticket/cooldown/emergency, or nothing before setup. Tap → `/tickets`. Also the app's always-mounted "countdown hit zero → `forceReconcile()`" watcher. |
+| `engine/TodayCard.tsx` | The Village's status card above the tab bar - one state line + one action per `EngineStatus`, plus the goal line. Also the app's always-mounted "countdown hit zero → `forceReconcile()`" watcher (inherited from the deleted `TicketChip.tsx`) - so HomeScreen toggles its `visible` prop (edit mode, unfocused tab) instead of unmounting it. Sibling of the world's `GestureDetector`, wrapper `box-none` - only the card's own box takes touches. |
+| `engine/StreakBadge.tsx` | Flame + `state.streak` next to `CurrencyHud`, same look, dimmed at 0, `pointerEvents="none"`. |
 | `screentime/useAuthorization.ts` | Just `requestAuthorization`/`useAuthorizationStatus`/`isAvailable` - what's left after the old threshold-based `useScreenTime.ts` was deleted (see "Where this is going" #3). |
 | `screentime/BrainrotAppPicker.tsx` | The native **sheet** app picker (`DeviceActivitySelectionSheetViewPersisted`, opened from a "Choose apps" button) - not the inline view, which was found to render blank and swallow every touch on-device. See "Where this is going" #3. |
 | `screentime/ScreenTimeScreen.tsx` | The Screen time tab: setup flow (authorize → pick apps → Activate) when `!engine.state.armed`, else the dashboard (status, ticket pips, countdown, streak, "End ticket now", Disarm) plus the always-visible Developer section (fast mode, force reconcile, reset day, unblock-everything safety hatch, last-20 events, wallet ledger). |
@@ -580,7 +595,8 @@ everything reusable; `src/ui/` holds navigation chrome that isn't the world.
 | `items/useWorldItems.ts` | Placed items: state, mutations, collision rects, `isValidPlacement` / `overlapsOtherItem` / `findFreeSpot`, baseline-priority `itemAt` hit-testing, `serialize`/`restore` (unwired). |
 | `items/ItemLayer.tsx` | `ItemLayer` (the always-under / always-over passes), `ItemVisual` (one item, animated/static switch, used by the depth-sorted pass), `PlacedItemSprite` (with the behind/front toggle). |
 | `items/DragHighlight.tsx` | Yellow/red glow + drop-shadow on the held item. |
-| `items/DevInventory.tsx` | Throwaway test UI - **not the shop**. The catalog, world state and layer system are meant to survive into the real shop; this isn't. |
+| `items/DevInventory.tsx` | Throwaway test UI - **not the shop**. The catalog, world state and layer system are meant to survive into the real shop; this isn't. Only mounted in village edit mode (HomeScreen's `editing`); its "Done" leaves it, and leaving edit mode always resets `editMode` to `"none"`. |
+| `items/EditVillageButton.tsx` | The pencil ("Edit village") under `SettingsButton` that enters edit mode. Hidden while editing. |
 | `items/editMode.ts` | The `"none" | "move" | "delete"` type, shared by `DevInventory` and `useSceneGestures`. |
 
 `src/engine/`, `src/stores/`, `src/hooks/` from an earlier plan **no longer exist** - don't

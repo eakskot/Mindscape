@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
+import { strings } from "../../ui/strings";
+import { theme } from "../../ui/TabBar/theme";
 import { type ItemId, unlockedItems } from "./itemCatalog";
 import type { EditMode } from "./editMode";
 
@@ -10,6 +12,10 @@ import type { EditMode } from "./editMode";
  *
  * Locked items are hidden here the same way the shop will hide them - by
  * filtering on `unlocked` - so the flow is already the real one.
+ *
+ * Only mounted while the village is in edit mode (HomeScreen.tsx, entered
+ * via EditVillageButton's pencil). "Done" leaves edit mode; the parent
+ * resets `editMode` to "none" on the way out.
  */
 type DevInventoryProps = {
   onPlace: (itemId: ItemId) => void;
@@ -28,6 +34,7 @@ type DevInventoryProps = {
   editMode: EditMode;
   onSetEditMode: (mode: EditMode) => void;
   placedCount: number;
+  onDone: () => void;
 };
 
 export const DevInventory = ({
@@ -36,6 +43,7 @@ export const DevInventory = ({
   editMode,
   onSetEditMode,
   placedCount,
+  onDone,
 }: DevInventoryProps) => {
   const [open, setOpen] = useState(false);
   const items = unlockedItems();
@@ -91,6 +99,14 @@ export const DevInventory = ({
         </Pressable>
         <Pressable style={styles.button} onPress={onClear}>
           <Text style={styles.buttonText}>Clear</Text>
+        </Pressable>
+        <View style={styles.spacer} />
+        <Pressable
+          style={[styles.button, styles.doneButton]}
+          onPress={onDone}
+          accessibilityRole="button"
+        >
+          <Text style={styles.doneText}>{strings.edit.done}</Text>
         </Pressable>
       </View>
     </View>
@@ -157,6 +173,17 @@ const styles = StyleSheet.create({
     // The same yellow the in-world drag highlight uses (see
     // DragHighlight.tsx), so the button and the glow read as one idea.
     backgroundColor: "#c9971f",
+  },
+  spacer: {
+    flex: 1,
+  },
+  doneButton: {
+    backgroundColor: theme.colors.accent,
+  },
+  doneText: {
+    color: theme.colors.playIcon,
+    fontSize: 13,
+    fontWeight: "700",
   },
   buttonText: {
     color: "#ffffff",

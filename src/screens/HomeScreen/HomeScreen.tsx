@@ -190,7 +190,7 @@ export default function HomeScreen() {
         always-on zero-countdown reconcile watcher, see TodayCard.tsx.
         Focus-gated for the same Pressable bleed-through reason as above.
       */}
-      <TodayCard balance={wallet.balance} visible={isFocused && !editing} />
+      <TodayCard visible={isFocused && !editing} />
     </View>
   );
 }

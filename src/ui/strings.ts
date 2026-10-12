@@ -31,9 +31,6 @@ export const strings = {
     cooldown: (countdown: string) => `Next ticket in ${countdown}`,
     outOfTickets: (resetHour: string) => `No tickets left today · resets at ${resetHour}`,
     focus: (countdown: string) => `Focus session · ${countdown}`,
-    goal: (name: string, balance: number, price: number) =>
-      `Next goal: ${name} · ${balance}/${price}`,
-    canAfford: (name: string) => `You can afford ${name}`,
   },
   streak: {
     accessibility: (days: number) => `${days} day streak`,

@@ -1,9 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { nextGoal } from "../economy/nextGoal";
 import { formatMMSS } from "../../ui/formatDuration";
 import { strings } from "../../ui/strings";
 import { theme } from "../../ui/TabBar/theme";
@@ -17,7 +16,6 @@ import { makeStyles, useTheme } from "../../ui/theme";
 const GAP_ABOVE_TAB_BAR = 10;
 
 type TodayCardProps = {
-  balance: number;
   /**
    * False while editing the village (or while another tab is focused) - the
    * card then draws nothing, but stays *mounted*: its zero-countdown
@@ -29,9 +27,8 @@ type TodayCardProps = {
 
 /**
  * The Village screen's "what's my status, what's my next step" card, pinned
- * just above the tab bar. One line of engine state + one primary action,
- * plus one optional goal line from the economy. Detailed metrics belong on
- * Profile, not here - see CLAUDE.md.
+ * just above the tab bar. One line of engine state + one primary action.
+ * Detailed metrics belong on Profile, not here - see CLAUDE.md.
  *
  * Doubles as the app's one always-mounted "did a countdown just hit zero"
  * watcher (inherited from the old TicketChip it replaced): bottom-tabs
@@ -48,7 +45,7 @@ type TodayCardProps = {
  * HomeScreen.tsx), never inside it, so pans/pinches outside the card's
  * area reach the world unchanged.
  */
-export function TodayCard({ balance, visible }: TodayCardProps) {
+export function TodayCard({ visible }: TodayCardProps) {
   const engine = useEngine();
   const { state, status, config } = engine;
 
@@ -73,7 +70,6 @@ export function TodayCard({ balance, visible }: TodayCardProps) {
   const tabBarHeight = useTabBarHeight();
   const { palette } = useTheme();
   const styles = useStyles();
-  const goal = useMemo(() => nextGoal(balance), [balance]);
 
   if (!visible) return null;
 
@@ -107,34 +103,6 @@ export function TodayCard({ balance, visible }: TodayCardProps) {
             <Feather name="chevron-right" size={16} color={palette.textSecondary} />
           )}
         </Pressable>
-
-        {goal && (
-          <Pressable
-            style={styles.goalRow}
-            onPress={() => router.navigate("/shop")}
-            accessibilityRole="button"
-          >
-            {goal.kind === "canAfford" ? (
-              <Text style={styles.goalText} numberOfLines={1}>
-                {strings.today.canAfford(goal.label)}
-              </Text>
-            ) : (
-              <>
-                <Text style={styles.goalText} numberOfLines={1}>
-                  {strings.today.goal(goal.label, balance, goal.price)}
-                </Text>
-                <View style={styles.progressTrack}>
-                  <View
-                    style={[
-                      styles.progressFill,
-                      { width: `${Math.min(100, (balance / goal.price) * 100)}%` },
-                    ]}
-                  />
-                </View>
-              </>
-            )}
-          </Pressable>
-        )}
       </View>
     </View>
   );
@@ -226,30 +194,5 @@ const useStyles = makeStyles((c) => ({
     color: c.accentText,
     fontSize: 13,
     fontWeight: "700",
-  },
-  goalRow: {
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: c.divider,
-  },
-  goalText: {
-    color: c.coin,
-    fontSize: 12,
-    fontWeight: "500",
-    fontVariant: ["tabular-nums"],
-  },
-  progressTrack: {
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: c.border,
-    overflow: "hidden",
-  },
-  progressFill: {
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: c.coin,
   },
 }));

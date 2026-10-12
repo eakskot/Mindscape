@@ -40,9 +40,9 @@ ways. What's in:
 - **Village = home, with a Today card** (2026-10-12, `feat/home-today`): the village stays
   the home screen, but it must answer "what's my status?" and "what's my next step?" within
   two seconds. `engine/TodayCard.tsx` sits above the tab bar: one line of engine state + one
-  primary action (Set up / Use a ticket / tap through to `/tickets` or `/focus`), plus one
-  goal line from the economy (`economy/nextGoal.ts`: "You can afford X" or "Next goal: X ·
-  n/price" -> Shop). Top-right row is now `StreakBadge` + `CurrencyHud`. **No detailed
+  primary action (Set up / Use a ticket / tap through to `/tickets` or `/focus`). A
+  secondary "next shop goal" line used to sit under it - removed 2026-10-12 at Emil's
+  request (cluttered the card); don't re-add without asking. Top-right row is now `StreakBadge` + `CurrencyHud`. **No detailed
   metrics on the home screen** (time saved, weekly charts) - those belong on Profile. User
   copy for this overlay lives in `src/ui/strings.ts`.
 - **Scenery** (trees/rocks/bushes): free-standing, Y-sorted against the character and
@@ -585,14 +585,13 @@ everything reusable; `src/ui/` holds navigation chrome that isn't the world.
 | `economy/economyConfig.ts` | Every coin amount (`ECONOMY`) and the Shop's prices (`SHOP_PRICES`) - the one place to tune the economy. |
 | `economy/settleDay.ts` | `settleDay()` - pure, no wallet/storage access: one day's engine summary in, `{totalCoins, newStreak, breakdown}` out. Called from `engineLogic.ts`'s `reconcile()`. |
 | `economy/CurrencyHud.tsx` | The balance badge - presentational only, sits in `HomeScreen.tsx`'s `topRightRow` next to `engine/StreakBadge.tsx`, not positioned itself. |
-| `economy/nextGoal.ts` | `nextGoal(balance, owned?)` - pure: the most expensive affordable unowned item, else the cheapest unowned one, from `SHOP_PRICES` + the catalog. `owned` is empty until purchasing lands. |
 | `engine/types.ts` | `EngineState`/`EngineStatus`/`EngineEffect`/`EngineResult` - **read this first** for the ticket engine, same role `scene.ts` plays for the world. |
 | `engine/config.ts` | Every engine constant, normal + "fast test mode" (`configFor(fastMode)`), plus `BRAINROT_SELECTION_ID` and the reblock-schedule constants. |
 | `engine/storage.ts` | `getJSON`/`setJSON` over the library's `userDefaultsSet/Get` - what `WalletContext`, `EngineProvider` and `HomeScreen.tsx`'s removed-scenery state all persist through. |
 | `engine/engineLogic.ts` | The whole ticket engine's rules as pure functions (`arm`, `disarm`, `startTicket`, `endTicketEarly`, `startEmergency`, `startFocus`, `giveUpFocus`, `reconcile`) - **no native calls, no storage** - see "Where this is going" #3. `dayKeyFor()` is the 04:00-rollover day-key function. |
 | `engine/deviceActivityBridge.ts` | The *only* file that calls the library's blocking/scheduling/shield APIs (`blockAll`, `unblockAll`, `scheduleReblock`, `cancelReblock`, `configureShield`, `isShieldActive`) - everything else goes through `EngineEffect`s. |
 | `engine/EngineProvider.tsx` | `EngineProvider`/`useEngine()` - runs a pure result's effects through the bridge + wallet, persists state, runs `reconcile()` at startup/on `AppState` "active", exposes the Developer-section dev tools (`forceReconcile`, `resetDay`, `unblockEverything`, `setFastMode`) and `dismissSummary()`. |
-| `engine/TodayCard.tsx` | The Village's status card above the tab bar - one state line + one action per `EngineStatus`, plus the goal line. Also the app's always-mounted "countdown hit zero → `forceReconcile()`" watcher (inherited from the deleted `TicketChip.tsx`) - so HomeScreen toggles its `visible` prop (edit mode, unfocused tab) instead of unmounting it. Sibling of the world's `GestureDetector`, wrapper `box-none` - only the card's own box takes touches. |
+| `engine/TodayCard.tsx` | The Village's status card above the tab bar - one state line + one action per `EngineStatus` - nothing else. Also the app's always-mounted "countdown hit zero → `forceReconcile()`" watcher (inherited from the deleted `TicketChip.tsx`) - so HomeScreen toggles its `visible` prop (edit mode, unfocused tab) instead of unmounting it. Sibling of the world's `GestureDetector`, wrapper `box-none` - only the card's own box takes touches. |
 | `engine/StreakBadge.tsx` | Flame + `state.streak` next to `CurrencyHud`, same look, dimmed at 0, `pointerEvents="none"`. |
 | `screentime/useAuthorization.ts` | Just `requestAuthorization`/`useAuthorizationStatus`/`isAvailable` - what's left after the old threshold-based `useScreenTime.ts` was deleted (see "Where this is going" #3). |
 | `screentime/BrainrotAppPicker.tsx` | The native **sheet** app picker (`DeviceActivitySelectionSheetViewPersisted`, opened from a "Choose apps" button) - not the inline view, which was found to render blank and swallow every touch on-device. See "Where this is going" #3. |

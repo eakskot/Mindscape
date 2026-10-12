@@ -222,7 +222,6 @@ function SceneStage({
   const images = useItemImages();
 
   const world = useWorldItems(scene.bounds, scene.tileSize, scene.placementMask);
-
   const [editMode, setEditMode] = useState<EditMode>("none");
   // Leaving edit mode (however it happens) drops any move/delete mode too,
   // so the world never stays frozen with no toolbar to unfreeze it.
@@ -556,6 +555,7 @@ function SceneStage({
           onSetEditMode={setEditMode}
           placedCount={world.items.length}
           onDone={onDoneEditing}
+          sceneId={sceneId}
         />
       )}
     </View>

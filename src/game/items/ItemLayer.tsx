@@ -36,7 +36,8 @@ import type { ItemImages } from "./itemImages";
  * the character walks past something.
  *
  * Items draw at their own `entityScale` (locked to `worldScale` - see
- * entitySprite.ts), *outside* the world's scaled Group.
+ * entitySprite.ts), *outside* the world's scaled Group - times the item's
+ * own `drawScale` (default 1; the village houses use 0.5, the map's scale).
  */
 export type LayerPass = "behind" | "front" | "always";
 
@@ -55,12 +56,14 @@ const StaticSprite = ({
   item: PlacedItem;
   image: SkImage | null;
 } & EntityProps) => {
+  // See ItemDefinition.drawScale - 0.5 = the map's own tile scale (houses).
+  const drawScale = definition.drawScale ?? 1;
   const transform = useDerivedValue(() => {
     const point = toScreenPoint(item.x, item.y, camera.value, worldScale.value, density);
     return [
       { translateX: point.x },
       { translateY: point.y },
-      { scale: entityScale.value },
+      { scale: entityScale.value * drawScale },
     ];
   });
 
@@ -93,6 +96,7 @@ const AnimatedSprite = ({
   image: SkImage | null;
 } & EntityProps) => {
   const { frames, fps } = definition.animation!;
+  const drawScale = definition.drawScale ?? 1;
   const clock = useClock();
 
   const sprites = useRectBuffer(1, (rect) => {
@@ -108,7 +112,7 @@ const AnimatedSprite = ({
   const transforms = useRSXformBuffer(1, (xform) => {
     "worklet";
     const point = toScreenPoint(item.x, item.y, camera.value, worldScale.value, density);
-    xform.set(entityScale.value, 0, point.x, point.y);
+    xform.set(entityScale.value * drawScale, 0, point.x, point.y);
   });
 
   return (

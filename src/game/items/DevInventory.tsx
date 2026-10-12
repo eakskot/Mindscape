@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { strings } from "../../ui/strings";
-import { type ItemId, unlockedItems } from "./itemCatalog";
+import type { SceneId } from "../scene";
+import { allowedInScene, type ItemId, unlockedItems } from "./itemCatalog";
 import type { EditMode } from "./editMode";
 import { floatingSurface, makeStyles } from "../../ui/theme";
 
@@ -35,6 +36,8 @@ type DevInventoryProps = {
   onSetEditMode: (mode: EditMode) => void;
   placedCount: number;
   onDone: () => void;
+  /** Only items allowed in this scene are listed (houses are village-only). */
+  sceneId: SceneId;
 };
 
 export const DevInventory = ({
@@ -44,10 +47,11 @@ export const DevInventory = ({
   onSetEditMode,
   placedCount,
   onDone,
+  sceneId,
 }: DevInventoryProps) => {
   const [open, setOpen] = useState(false);
   const styles = useStyles();
-  const items = unlockedItems();
+  const items = unlockedItems().filter((item) => allowedInScene(item, sceneId));
 
   /** Tapping an already-active mode button turns it back off. */
   const toggle = (mode: EditMode) =>

@@ -51,6 +51,19 @@ export const SHOP_PRICES = {
 } as const;
 
 /**
+ * Placeholder prices for the placeable village houses
+ * (items/houseItems.generated.ts), by shape - every colour of a shape costs
+ * the same. Not wired to anything yet: the Shop is still read-only.
+ */
+export const HOUSE_PRICES_BY_SHAPE = {
+  small: 300,
+  tall: 350,
+  wide: 450,
+  corner: 500,
+  corner_big: 650,
+} as const;
+
+/**
  * What restoring each village zone costs, keyed by zone id (see
  * village/zones.ts - currently inert, the gameplay is on the
  * `archive/zones-clouds` branch). Wins over a `price` property set in Tiled, so prices

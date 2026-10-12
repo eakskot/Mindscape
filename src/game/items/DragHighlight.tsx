@@ -37,16 +37,17 @@ export const DragHighlight = ({
   const pulse = useDerivedValue(() => 0.55 + 0.35 * Math.sin(clock.value / 220));
 
   const definition = item ? ITEM_CATALOG[item.itemId] : null;
+  const drawScale = definition?.drawScale ?? 1;
 
   const transform = useDerivedValue(() => {
     if (!item) {
-      return [{ translateX: 0 }, { translateY: 0 }, { scale: entityScale.value }];
+      return [{ translateX: 0 }, { translateY: 0 }, { scale: entityScale.value * drawScale }];
     }
     const point = toScreenPoint(item.x, item.y, camera.value, worldScale.value, density);
     return [
       { translateX: point.x },
       { translateY: point.y },
-      { scale: entityScale.value },
+      { scale: entityScale.value * drawScale },
     ];
   });
 

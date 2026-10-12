@@ -71,12 +71,13 @@ export const hitTest = (
   roomY: number,
   entityScaleMultiplier: number,
 ) => {
-  const { width, height } = ITEM_CATALOG[item.itemId];
+  const { width, height, drawScale = 1 } = ITEM_CATALOG[item.itemId];
+  const scale = entityScaleMultiplier * drawScale;
   return (
     roomX >= item.x &&
-    roomX <= item.x + width * entityScaleMultiplier &&
+    roomX <= item.x + width * scale &&
     roomY >= item.y &&
-    roomY <= item.y + height * entityScaleMultiplier
+    roomY <= item.y + height * scale
   );
 };
 
@@ -104,6 +105,32 @@ const cellIsValid = (
     return false;
   }
   return mask.grid.value[row * mask.columns + col] === 1;
+};
+
+/**
+ * `placement: "footprint"` items (houses): every tile the footprint touches
+ * must be valid ground, not just the anchor - a house must not hang over
+ * water, a fence or another building.
+ */
+const footprintIsValid = (
+  mask: TileCollision,
+  x: number,
+  y: number,
+  definition: ItemDefinition,
+) => {
+  const { footprint } = definition;
+  const minCol = Math.floor((x + footprint.x) / mask.tileSize);
+  const maxCol = Math.floor((x + footprint.x + footprint.width - 1) / mask.tileSize);
+  const minRow = Math.floor((y + footprint.y) / mask.tileSize);
+  const maxRow = Math.floor((y + footprint.y + footprint.height - 1) / mask.tileSize);
+  for (let row = minRow; row <= maxRow; row++) {
+    for (let col = minCol; col <= maxCol; col++) {
+      if (!cellIsValid(mask, (col + 0.5) * mask.tileSize, (row + 0.5) * mask.tileSize)) {
+        return false;
+      }
+    }
+  }
+  return true;
 };
 
 /** Whether an item of `definition` at `x,y` would overlap `other`'s sprite. */
@@ -175,6 +202,9 @@ export const useWorldItems = (
       const definition = ITEM_CATALOG[itemId];
       const snappedX = snap(clamp(x, bounds.minX, bounds.maxX - definition.width));
       const snappedY = snap(clamp(y, bounds.minY, bounds.maxY - definition.height));
+      if (definition.placement === "footprint") {
+        return footprintIsValid(placementMask, snappedX, snappedY, definition);
+      }
       const { anchorX, anchorY } = footprintAnchor(snappedX, snappedY, definition);
       return cellIsValid(placementMask, anchorX, anchorY);
     },

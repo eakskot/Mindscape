@@ -12,7 +12,11 @@
  * of the sprite is height, which the character should be able to stand behind.
  */
 
+import type { SceneId } from "../scene";
+import { HOUSE_ITEMS, type HouseItemId } from "./houseItems.generated";
+
 export type ItemId =
+  | HouseItemId
   | "basketball"
   | "bed_green"
   | "bed_purple"
@@ -64,6 +68,26 @@ export type ItemDefinition = {
    * No catalog item uses this yet.
    */
   animation?: { frames: number; fps: number };
+  /**
+   * Draw size relative to the usual entity scale (`worldScale x
+   * ENTITY_SCALE_MULTIPLIER`). Default 1 - furniture and characters draw at
+   * twice the tile scale. 0.5 draws the sprite at the *map's own* scale,
+   * pixel for pixel like a tile - used by the houses cut from the village
+   * tileset (houseItems.generated.ts), so they match the house on the map.
+   * At 0.5 the sprite size equals `width`/`height` in room pixels, so the
+   * footprint is in the same units as what you see.
+   */
+  drawScale?: number;
+  /** Which scenes the item may be placed in. Omitted = every scene. */
+  scenes?: SceneId[];
+  /**
+   * How placement is judged against the scene's placementMask: "anchor"
+   * (default) checks only the footprint's bottom-centre tile, so small
+   * props can straddle a decorative edge; "footprint" requires every tile
+   * under the footprint to be valid ground - for big solid things (houses)
+   * that must not hang over water or fences.
+   */
+  placement?: "anchor" | "footprint";
 };
 
 /**
@@ -291,9 +315,14 @@ export const ITEM_CATALOG: Record<ItemId, ItemDefinition> = {
     solid: true,
     unlocked: true,
   },
+  ...HOUSE_ITEMS,
 };
 
 export const ALL_ITEMS: ItemDefinition[] = Object.values(ITEM_CATALOG);
+
+/** Whether an item may be placed in a given scene (see `ItemDefinition.scenes`). */
+export const allowedInScene = (item: ItemDefinition, sceneId: SceneId) =>
+  !item.scenes || item.scenes.includes(sceneId);
 
 /** What the shop (and the dev inventory) is allowed to show. */
 export const unlockedItems = () => ALL_ITEMS.filter((item) => item.unlocked);

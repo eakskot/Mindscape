@@ -2749,3 +2749,18 @@ export const VILLAGE_SCENERY: VillageSceneryInstance[] = [
 
 /** Feet position at the centre of the spawn tile, in local village room pixels. */
 export const VILLAGE_SPAWN = { x: 904, y: 808 };
+
+/** One rectangle from Tiled's `zones` object layer, in inclusive tile coordinates. */
+export type VillageZoneDef = {
+  id: string;
+  name: string;
+  price: number;
+  order: number;
+  minCol: number;
+  minRow: number;
+  maxCol: number;
+  maxRow: number;
+};
+
+/** Null when map.tmx has no `zones` object layer - zones.ts then uses its own defaults. */
+export const VILLAGE_ZONES: VillageZoneDef[] | null = null;

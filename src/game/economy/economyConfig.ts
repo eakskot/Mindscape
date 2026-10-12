@@ -49,3 +49,17 @@ export const SHOP_PRICES = {
   fountain_tiered: 800,
   dinosaur_skeleton: 1000,
 } as const;
+
+/**
+ * What restoring each village zone costs, keyed by zone id (see
+ * village/zones.ts - currently inert, the gameplay is on the
+ * `archive/zones-clouds` branch). Wins over a `price` property set in Tiled, so prices
+ * are tuned here, not in the map. 0 = the zone starts unlocked.
+ */
+export const ZONE_PRICES: Record<string, number> = {
+  home: 0,
+  lookout_isle: 150,
+  sandy_bay: 350,
+  north_meadow: 600,
+  east_road: 1000,
+};

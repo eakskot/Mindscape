@@ -48,6 +48,19 @@ ways. What's in:
 - **Scenery** (trees/rocks/bushes): free-standing, Y-sorted against the character and
   placed items - so you walk *behind* a tree top and *in front* of its trunk. Batched into
   per-map-row bands for performance (see Design decisions).
+- **Zones + clouds - built, tried on the phone, reverted (2026-10-12).** Emil didn't like the
+  clouds or the locked-zone gameplay. The complete work (cloud layer, locked-zone collision/
+  placement, restore prompt + reveal, `ZonesContext` persistence, Developer zone tools,
+  debug overlay, and a CLAUDE.md writeup incl. measured walkability facts - e.g.
+  `lookout_isle`'s land sits on `ground_water_collision` and is unwalkable) is preserved
+  untouched on the **`archive/zones-clouds`** branch. On `main`, only inert pieces remain,
+  imported by nothing (so not bundled): `village/zones.ts` (zone rectangles + overlap
+  ownership), `ZONE_PRICES` in economyConfig.ts, the importer's optional Tiled `zones`
+  layer -> `VILLAGE_ZONES` (null today), and `scripts/generate-clouds.py` + its sheet
+  (`src/assets/sprites/clouds/clouds.png`, `village/cloudSheet.generated.ts`). Don't wire
+  any of it back up without asking. (The black bands seen when fully zoomed out are not
+  from zones - min zoom is `MIN_DEVICE_PIXEL_SCALE / density`, from the older "let the pinch
+  reach further out" commit.)
 - **Removable scenery + a currency HUD**: village scenery Tiled tags with a `group`
   property (a multi-tile tree, say `tree_04`) becomes a `SceneryGroup` - tap it to select
   (a highlight + a floating "remove for N" button), confirm to spend currency and remove it

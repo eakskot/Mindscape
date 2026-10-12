@@ -203,6 +203,49 @@ if (objectGroupMatch) {
   }
 }
 
+/**
+ * Optional `<objectgroup name="zones">` of plain rectangles - the village's
+ * unlockable zones (see src/game/village/zones.ts). Each rectangle carries
+ * custom properties `id` (string), `name` (string), `price` (int, 0 = starts
+ * unlocked) and `order` (int). Snapped to whole tiles here and emitted as
+ * `VILLAGE_ZONES`; `null` when the layer doesn't exist, in which case
+ * zones.ts falls back to its hand-written defaults. Prices in
+ * economyConfig.ts's ZONE_PRICES win over the Tiled `price` when set.
+ */
+const zonesGroupRe = /<objectgroup id="\d+" name="zones"[^>]*>([\s\S]*?)<\/objectgroup>/;
+const zoneObjectRe =
+  /<object id="\d+"(?: name="([^"]*)")?[^>]*? x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)"[^>]*?(?:\/>|>([\s\S]*?)<\/object>)/g;
+const zoneProp = (inner, name) => {
+  const m = inner.match(new RegExp(`<property name="${name}"(?: type="\\w+")? value="([^"]*)"\\s*\\/>`));
+  return m ? m[1] : undefined;
+};
+
+let zones = null;
+const zonesGroupMatch = content.match(zonesGroupRe);
+if (zonesGroupMatch) {
+  zones = [];
+  for (const m of zonesGroupMatch[1].matchAll(zoneObjectRe)) {
+    const inner = m[6] ?? "";
+    const minCol = Math.round(Number(m[2]) / TILE) - CROP_ORIGIN_COL;
+    const minRow = Math.round(Number(m[3]) / TILE) - CROP_ORIGIN_ROW;
+    const maxCol = minCol + Math.round(Number(m[4]) / TILE) - 1;
+    const maxRow = minRow + Math.round(Number(m[5]) / TILE) - 1;
+    const id = zoneProp(inner, "id") ?? m[1];
+    if (!id) throw new Error("A zones rectangle has no `id` property (or name)");
+    zones.push({
+      id,
+      name: zoneProp(inner, "name") ?? m[1] ?? id,
+      price: Number(zoneProp(inner, "price") ?? 0),
+      order: Number(zoneProp(inner, "order") ?? zones.length),
+      minCol: Math.max(0, minCol),
+      minRow: Math.max(0, minRow),
+      maxCol: Math.min(CROP_WIDTH - 1, maxCol),
+      maxRow: Math.min(CROP_HEIGHT - 1, maxRow),
+    });
+  }
+  zones.sort((a, b) => a.order - b.order);
+}
+
 const cropLayer = (gids) => {
   const cropped = new Array(CROP_WIDTH * CROP_HEIGHT);
   for (let row = 0; row < CROP_HEIGHT; row++) {
@@ -401,6 +444,23 @@ ${scenaryTs}
 
 /** Feet position at the centre of the spawn tile, in local village room pixels. */
 export const VILLAGE_SPAWN = { x: ${spawnX}, y: ${spawnY} };
+
+/** One rectangle from Tiled's \`zones\` object layer, in inclusive tile coordinates. */
+export type VillageZoneDef = {
+  id: string;
+  name: string;
+  price: number;
+  order: number;
+  minCol: number;
+  minRow: number;
+  maxCol: number;
+  maxRow: number;
+};
+
+/** Null when map.tmx has no \`zones\` object layer - zones.ts then uses its own defaults. */
+export const VILLAGE_ZONES: VillageZoneDef[] | null = ${
+  zones ? JSON.stringify(zones, null, 2) : "null"
+};
 `;
 
 writeFileSync(OUTPUT_FILE, output);
@@ -410,3 +470,4 @@ console.log(`Copied ${tilesets.length} tileset image(s) to ${ASSETS_TILES_DIR}`)
 console.log(`Crop: ${CROP_WIDTH}x${CROP_HEIGHT} tiles at source (${CROP_ORIGIN_COL},${CROP_ORIGIN_ROW})`);
 console.log(`Spawn: local pixel (${spawnX},${spawnY})`);
 console.log(`Scenery: ${croppedScenery.length} instance(s)`);
+console.log(zones ? `Zones: ${zones.length} from the \`zones\` layer` : "Zones: no `zones` layer - zones.ts defaults apply");

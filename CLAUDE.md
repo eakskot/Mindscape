@@ -58,7 +58,11 @@ ways. What's in:
   ownership), `ZONE_PRICES` in economyConfig.ts, the importer's optional Tiled `zones`
   layer -> `VILLAGE_ZONES` (null today), and `scripts/generate-clouds.py` + its sheet
   (`src/assets/sprites/clouds/clouds.png`, `village/cloudSheet.generated.ts`). Don't wire
-  any of it back up without asking. (The black bands seen when fully zoomed out are not
+  any of it back up without asking. **Two later redesigns were also dropped (2026-10-14)** -
+  `feat/sky-zones` (blue sky + soft dithered cloud sprites) and `feat/sky-fog` (ocean around
+  the map + opaque flat fog covers + lock/price markers), both local-only branches. Emil is
+  taking zones/progression in another direction: don't revive clouds/fog or propose them
+  again unless he asks. (The black bands seen when fully zoomed out are not
   from zones - min zoom is `MIN_DEVICE_PIXEL_SCALE / density`, from the older "let the pinch
   reach further out" commit.)
 - **Removable scenery + a currency HUD**: village scenery Tiled tags with a `group`
@@ -907,7 +911,14 @@ pack lives at `~/SERENE_VILLAGE_REVAMPED/maps/ModernExteriors_Ground_Variants_16
 - Portals live in scene data (`Scene.portals`), not code. A new scene mainly means a
   `Scene` + a portal pointing back.
 
-## For my self (Emil)
-
-Resume with `claude --resume`. If Claude Code seems unaware of recent context, tell it to
-read this file - it is kept current on purpose.
+## Product knowledge (eskot_mind vault)
+Strategy, user research, screen-time/gamification research and Emil's goals live in
+Emil's second brain at `/Users/emilskotner/eskot_mind` (an LLM Wiki, schema in its CLAUDE.md).
+Read access is pre-approved in `.claude/settings.local.json`.
+- Before product/design decisions (not routine code changes): read
+  `/Users/emilskotner/eskot_mind/wiki/index.md`, then `wiki/entities/Mindscape.md` and the
+  relevant linked pages. Cite the pages you relied on.
+- Never edit `/Users/emilskotner/eskot_mind/wiki/` from here. To feed something back (a
+  decision, a learning, user feedback), write a dated note to
+  `/Users/emilskotner/eskot_mind/raw/notes/YYYY-MM-DD Mindscape - <topic>.md` and tell Emil
+  to ingest it from the vault.

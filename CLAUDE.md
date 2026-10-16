@@ -750,9 +750,13 @@ the whole map. **Cell coordinates quoted below are old `map.tmx` cells**: add (+
 door trigger and the room-exit landing are all relative to `VILLAGE_SPAWN`. Scenery objects
 rotated in Tiled by a multiple of 90 deg are converted to flip bits by the importer; free
 rotation is skipped *with a warning*. The village sets `Scene.fillViewport`, so the camera
-can't zoom out past the map filling the screen (no bands). ~190 fully transparent scenery
-objects remain inside the islands (empty corners of multi-tile trees, many `solid`) -
-invisible blockers worth a Tiled cleanup some day. Layers use
+can't zoom out past the map filling the screen (no bands). **Cleaned 2026-10-16** (render
+verified pixel-identical before/after): removed 149 fully transparent scenery objects (no
+`group`; empty tree-stamp corners and leftovers in the water - all `solid`, so 51 land cells
+became walkable), transparent tiles in non-collision layers, and tiles fully hidden under an
+opaque tile in a higher layer (mostly grass under open sea). **Kept on purpose:** the 68
+fully transparent tiles in `col_house_collision` - they're deliberate invisible walls along
+the yard fence and the bridge sides. Don't "clean" those. Layers use
 a `ground_* / deco_* / col_*` naming scheme (`ground_grass`, `ground_water_collision`,
 `ground_beach`, `ground_paths`, `ground_bridges`, `ground_fences_collision`,
 `deco_small_extras`, `col_house_collision`). Trees/rocks/bushes are **not** a layer - the

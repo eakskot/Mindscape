@@ -742,13 +742,17 @@ player, see `Character.tsx`'s `NPC_SHEET`/`NPC_SHEET_2`/`NPC_SHEET_3`).
 **Village map** (`~/SERENE_VILLAGE_REVAMPED/maps/map_islands.tmx` since 2026-10-16,
 **outside the repo, not in git** - path hardcoded as `SOURCE_TMX` in the importer). An
 island layout: the old single-landmass village (`map.tmx`, kept for reference, no longer
-imported) was moved into a bigger sea and split into islands by Emil. **180 x 120 tiles**,
-16px; the importer takes the whole map. The house sits 30 cols / 20 rows further in than in
-`map.tmx`, so **cell coordinates quoted below are old `map.tmx` cells** (add 30/20 for
-`map_islands.tmx`) unless stated otherwise. The importer's `SPAWN_COL/ROW` (86,70) is the
-one anchor: NPC spawns, the door trigger and the room-exit landing are all relative to
-`VILLAGE_SPAWN`. Scenery objects rotated in Tiled by a multiple of 90 deg are converted to
-flip bits by the importer; free rotation is skipped *with a warning*. Formerly 120 x 80. Layers use
+imported) was moved into a sea and split into islands by Emil, then cropped to the islands
+plus 8 tiles of water (invisible leftovers outside - fully transparent scenery objects,
+grass hidden under open water - were dropped). **137 x 82 tiles**, 16px; the importer takes
+the whole map. **Cell coordinates quoted below are old `map.tmx` cells**: add (+9, -12) for
+`map_islands.tmx`. The importer's `SPAWN_COL/ROW` (65,38) is the one anchor: NPC spawns, the
+door trigger and the room-exit landing are all relative to `VILLAGE_SPAWN`. Scenery objects
+rotated in Tiled by a multiple of 90 deg are converted to flip bits by the importer; free
+rotation is skipped *with a warning*. The village sets `Scene.fillViewport`, so the camera
+can't zoom out past the map filling the screen (no bands). ~190 fully transparent scenery
+objects remain inside the islands (empty corners of multi-tile trees, many `solid`) -
+invisible blockers worth a Tiled cleanup some day. Layers use
 a `ground_* / deco_* / col_*` naming scheme (`ground_grass`, `ground_water_collision`,
 `ground_beach`, `ground_paths`, `ground_bridges`, `ground_fences_collision`,
 `deco_small_extras`, `col_house_collision`). Trees/rocks/bushes are **not** a layer - the

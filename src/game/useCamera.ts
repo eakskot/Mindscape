@@ -158,7 +158,15 @@ export const useCamera = ({
   // stop zooming out at "1 point per room pixel" (3 device px per texel,
   // 3x more magnified than pixel art actually needs) can now go a further
   // `density`x out, still perfectly crisp.
-  const minWorldScale = MIN_DEVICE_PIXEL_SCALE / density;
+  //
+  // A scene with `fillViewport` (the village) gets a higher floor: the
+  // smallest crisp scale at which the map still covers the whole screen on
+  // both axes, rounded *up* onto the device-pixel grid - zoomed out as far
+  // as it goes, there's still no empty band around the map.
+  const fillScale = scene.fillViewport
+    ? Math.ceil(Math.max(width / scene.width, height / scene.height) * density - 1e-6) / density
+    : 0;
+  const minWorldScale = Math.max(MIN_DEVICE_PIXEL_SCALE / density, fillScale);
   const maxWorldScale = MAX_DEVICE_PIXEL_SCALE / density;
 
   // The nearest scale that keeps a whole number of device pixels per texel

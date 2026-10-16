@@ -53,8 +53,8 @@ const CROP_HEIGHT_SETTING = null;
 // above. villageLayout.ts and roomLayout.ts place the NPCs, the door
 // trigger and the room-exit landing relative to this, so moving the house
 // in Tiled only needs this one pair updated.
-const SPAWN_COL = 86;
-const SPAWN_ROW = 70;
+const SPAWN_COL = 65;
+const SPAWN_ROW = 38;
 
 const TILE = 16;
 

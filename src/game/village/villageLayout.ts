@@ -515,6 +515,7 @@ const buildVillageLayout = () => {
     id: "village",
     tileSize: VILLAGE_TILE,
     preferredTilesVisibleTall: VILLAGE_TILES_VISIBLE_TALL,
+    fillViewport: true,
     layers,
     sceneryBands,
     sceneryGroups,

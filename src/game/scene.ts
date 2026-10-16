@@ -114,6 +114,12 @@ export type Scene = {
    * a value per scene.
    */
   preferredTilesVisibleTall: number;
+  /**
+   * Never zoom out past the point where the scene fills the whole viewport
+   * (no empty bands around the map). The village sets it; the room - smaller
+   * than the screen, meant to be seen whole - doesn't.
+   */
+  fillViewport?: boolean;
   /** Bottom-to-top draw order. */
   layers: SceneLayer[];
   /**

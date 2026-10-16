@@ -9,6 +9,7 @@
 import { FRAME_WIDTH } from "./characterSheet";
 import { ROOM_CONFIG, type RoomConfig } from "./roomConfig";
 import type { Scene, Tile } from "./scene";
+import { VILLAGE_SPAWN } from "./village/villageMap.generated";
 import { FLOOR_TILESET, TILE, WALL_TILESET, styleOrigin } from "./tilesets";
 
 /**
@@ -109,14 +110,14 @@ export const buildRoomLayout = (config: RoomConfig): Scene => {
         // the plan notes), the exit works functionally without one for now.
         trigger: { minX: 80, maxX: 112, minY: 112, maxY: 128 },
         targetScene: "village",
-        // Hardcoded rather than importing VILLAGE.start / the village's
-        // portal, to avoid a circular import - this is the porch tile
-        // right in front of the door. It lands *inside* the village's own
+        // From the generated map data rather than VILLAGE.start, so the
+        // two layout files never import each other - one tile above the
+        // village spawn: the porch tile right in front of the door. It lands *inside* the village's own
         // door trigger (see villageLayout.ts), not south of it - that's
         // fine because usePortalWatcher only fires on crossing a trigger's
         // boundary, not on merely standing inside one, so arriving here
         // doesn't bounce the player straight back in.
-        targetSpawn: { x: 904, y: 792 },
+        targetSpawn: { x: VILLAGE_SPAWN.x, y: VILLAGE_SPAWN.y - 16 },
       },
     ],
   };

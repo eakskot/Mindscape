@@ -30,6 +30,12 @@ export const useVillageImages = () => {
   const groundVariants = useImage(
     require("../assets/tiles/ModernExteriors_Ground_Variants_16x16.png"),
   );
+  // firstGid 6918 - the Terrains image again, as a second tileset with no
+  // animations defined (for water-looking tiles that must stay still).
+  // Same file, so useImage hands back the same decoded image.
+  const terrainsStatic = useImage(
+    require("../assets/tiles/Terrains_TILESET_B-C-D-E.png"),
+  );
 
   // Memoized so the returned array is reference-stable once every image has
   // decoded (useImage itself already caches each individual SkImage by
@@ -37,7 +43,7 @@ export const useVillageImages = () => {
   // defeating SceneLayers.tsx's own `memo` on SceneLayerAtlas, which reads
   // `images` as a whole prop).
   return useMemo(
-    () => [terrains, outsideStuff, houses, groundVariants],
-    [terrains, outsideStuff, houses, groundVariants],
+    () => [terrains, outsideStuff, houses, groundVariants, terrainsStatic],
+    [terrains, outsideStuff, houses, groundVariants, terrainsStatic],
   );
 };

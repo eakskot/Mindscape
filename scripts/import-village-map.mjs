@@ -23,7 +23,7 @@
  * its *bottom-left* corner, unlike a layer cell's top-left, so that gets
  * undone here too.
  *
- * Re-run this after editing map.tmx in Tiled:
+ * Re-run this after editing the map in Tiled:
  *   node scripts/import-village-map.mjs
  *
  * Edit the constants below to change which part of the map is imported, or
@@ -33,22 +33,28 @@ import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const SOURCE_TMX = "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps/map.tmx";
+// The island layout (2026-10-16) - map.tmx is the older single-landmass
+// village, kept for reference but no longer imported.
+const SOURCE_TMX = "/Users/emilskotner/SERENE_VILLAGE_REVAMPED/maps/map_islands.tmx";
 const SOURCE_DIR = dirname(SOURCE_TMX);
 
 // Crop window, in the source map's tile coordinates. The camera follows the
 // character now, so there is no need to crop down to a single screen's
 // worth of tiles - this imports the whole map. (Set these to a sub-window
 // instead if you ever want to import less than the full map.)
+// CROP_WIDTH/HEIGHT default to the whole map (null = "to the map's edge").
 const CROP_ORIGIN_COL = 0;
 const CROP_ORIGIN_ROW = 0;
-const CROP_WIDTH = 120;
-const CROP_HEIGHT = 80;
+const CROP_WIDTH_SETTING = null;
+const CROP_HEIGHT_SETTING = null;
 
-// Where the character spawns, in the source map's tile coordinates. Must
-// fall inside the crop window above.
-const SPAWN_COL = 56;
-const SPAWN_ROW = 50;
+// Where the character spawns, in the source map's tile coordinates (the
+// path just south of the house's door). Must fall inside the crop window
+// above. villageLayout.ts and roomLayout.ts place the NPCs, the door
+// trigger and the room-exit landing relative to this, so moving the house
+// in Tiled only needs this one pair updated.
+const SPAWN_COL = 86;
+const SPAWN_ROW = 70;
 
 const TILE = 16;
 
@@ -68,6 +74,8 @@ if (!mapMatch) {
 }
 const mapWidth = Number(mapMatch[1]);
 const mapHeight = Number(mapMatch[2]);
+const CROP_WIDTH = CROP_WIDTH_SETTING ?? mapWidth - CROP_ORIGIN_COL;
+const CROP_HEIGHT = CROP_HEIGHT_SETTING ?? mapHeight - CROP_ORIGIN_ROW;
 
 /**
  * Inline tilesets only - this map does not reference external .tsx files.
@@ -158,8 +166,8 @@ if (layers.length === 0) {
  * The "scenery" object layer: free-standing tile objects (trees, rocks,
  * bushes) that need to draw in front of or behind the character and items
  * depending on where they stand - see this file's header comment and
- * villageLayout.ts. Every object here is a plain, unrotated-container tile
- * object (`<object gid=... x=... y=... width=... height=...>`), optionally
+ * villageLayout.ts. Every object here is a tile object
+ * (`<object gid=... x=... y=... width=... height=...>`), optionally
  * carrying a `solid` bool property (defaults true if omitted - every object
  * this importer has ever produced sets it explicitly, but a hand-added one
  * in Tiled might not), and optionally a `group` string property.
@@ -176,10 +184,36 @@ if (layers.length === 0) {
  * Tiled anchors a tile object at its *bottom-left* corner - unlike a layer
  * cell, which is top-left - so `y` is converted to the sprite's top edge
  * (`y - height`) here, once, rather than every consumer re-deriving it.
+ *
+ * Rotation: an object rotated in Tiled (Z / Shift+Z, or by hand) carries a
+ * `rotation="deg"` attribute, clockwise about its bottom-left anchor. Any
+ * angle within ROTATION_SNAP_DEG of a multiple of 90 is snapped and turned
+ * into the same flip bits a rotated layer cell uses (so villageLayout.ts
+ * decodes it like any other tile), with the position moved to the rotated
+ * tile's new top-left cell. Anything else (free rotation, e.g. 45 deg) is
+ * not supported - those objects are skipped with a warning, never silently.
  */
 const objectGroupRe = /<objectgroup id="\d+" name="scenery"[^>]*>([\s\S]*?)<\/objectgroup>/;
 const objectRe =
-  /<object id="\d+" gid="(\d+)" x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)"\s*(?:\/>|>([\s\S]*?)<\/object>)/g;
+  /<object id="(\d+)" gid="(\d+)" x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)"(?: rotation="(-?[\d.]+)")?\s*(?:\/>|>([\s\S]*?)<\/object>)/g;
+const ROTATION_SNAP_DEG = 2;
+const FLIP_H = 0x80000000;
+const FLIP_V = 0x40000000;
+const FLIP_D = 0x20000000;
+const FLIP_BITS = FLIP_H | FLIP_V | FLIP_D;
+
+/**
+ * Composes a clockwise quarter-turn onto a GID's existing flip bits - the
+ * same (D, H, V) encoding Tiled uses for a layer cell rotated with Z:
+ * one 90 deg CW turn maps (d, h, v) -> (!d, !v, h).
+ */
+const rotateGidClockwise = (gid) => {
+  const d = (gid & FLIP_D) !== 0;
+  const h = (gid & FLIP_H) !== 0;
+  const v = (gid & FLIP_V) !== 0;
+  const base = (gid & ~FLIP_BITS) >>> 0;
+  return (base | (!d ? FLIP_D : 0) | (!v ? FLIP_H : 0) | (h ? FLIP_V : 0)) >>> 0;
+};
 const solidPropertyRe = /<property name="solid" type="bool" value="(true|false)"\s*\/>/;
 // Tiled omits `type` for a plain string property (string is the implicit
 // default type - only non-string types like `solid`'s bool get one), so
@@ -189,17 +223,50 @@ const groupPropertyRe = /<property name="group"(?: type="string")? value="([^"]*
 const sceneryObjects = [];
 const objectGroupMatch = content.match(objectGroupRe);
 if (objectGroupMatch) {
+  const allObjects = objectGroupMatch[1].match(/<object\b/g)?.length ?? 0;
+  let matched = 0;
   for (const m of objectGroupMatch[1].matchAll(objectRe)) {
-    const gid = Number(m[1]);
-    const x = Number(m[2]);
-    const yBottom = Number(m[3]);
-    const height = Number(m[5]);
-    const inner = m[6] ?? "";
+    matched++;
+    let gid = Number(m[2]);
+    let x = Number(m[3]);
+    let yBottom = Number(m[4]);
+    let height = Number(m[6]);
+    const rotation = m[7] === undefined ? 0 : Number(m[7]);
+    const inner = m[8] ?? "";
+    if (rotation !== 0) {
+      const quarter = Math.round(rotation / 90);
+      if (Math.abs(rotation - quarter * 90) > ROTATION_SNAP_DEG) {
+        console.warn(`Skipping scenery object ${m[1]}: rotation ${rotation} deg is not a multiple of 90 (free rotation isn't supported).`);
+        continue;
+      }
+      const turns = ((quarter % 4) + 4) % 4;
+      // Rotating clockwise about the bottom-left anchor (x, yBottom): the
+      // tile's box swings to the left/up of where it was. Work out the
+      // rotated box's top-left so the rest of the pipeline sees a plain,
+      // unrotated tile in the right place.
+      const size = Number(m[5]);
+      for (let t = 0; t < turns; t++) gid = rotateGidClockwise(gid);
+      if (turns === 1) {
+        // 90 CW: box spans x..x+size, yBottom..yBottom+size -> top-left (x, yBottom)
+        yBottom = yBottom + size;
+      } else if (turns === 2) {
+        // 180: box spans x-size..x, yBottom..yBottom+size
+        x = x - size;
+        yBottom = yBottom + size;
+      } else if (turns === 3) {
+        // 270 CW: box spans x-size..x, yBottom-size..yBottom
+        x = x - size;
+      }
+      height = size;
+    }
     const solidMatch = inner.match(solidPropertyRe);
     const solid = solidMatch ? solidMatch[1] === "true" : true;
     const groupMatch = inner.match(groupPropertyRe);
     const group = groupMatch ? groupMatch[1] : undefined;
     sceneryObjects.push({ gid, x, y: yBottom - height, solid, group });
+  }
+  if (matched !== allObjects) {
+    console.warn(`${allObjects - matched} scenery object(s) didn't match the expected tile-object shape and were skipped - check them in Tiled.`);
   }
 }
 
@@ -357,7 +424,7 @@ const tilesetsTs = tilesets
 
 const output = `/**
  * GENERATED by scripts/import-village-map.mjs — re-run after editing
- * map.tmx in Tiled. Do not hand-edit.
+ * the map in Tiled. Do not hand-edit.
  *
  * Source: ${SOURCE_TMX}
  * Crop: columns ${CROP_ORIGIN_COL}-${CROP_ORIGIN_COL + CROP_WIDTH - 1}, rows ${CROP_ORIGIN_ROW}-${CROP_ORIGIN_ROW + CROP_HEIGHT - 1} (${CROP_WIDTH}x${CROP_HEIGHT} tiles)

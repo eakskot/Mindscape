@@ -739,8 +739,16 @@ player, see `Character.tsx`'s `NPC_SHEET`/`NPC_SHEET_2`/`NPC_SHEET_3`).
 **Room_Builder tilesets:** styles are 3x2 tile blocks. Floors repeat (`col % 3`, `row %
 2`). Walls are a horizontal 3-slice, two tiles tall. See generated `docs/tile-styles-*.png`.
 
-**Village map** (`~/SERENE_VILLAGE_REVAMPED/maps/map.tmx`, **outside the repo, not in
-git** - path hardcoded as `SOURCE_TMX` in the importer). 120 x 80 tiles, 16px. Layers use
+**Village map** (`~/SERENE_VILLAGE_REVAMPED/maps/map_islands.tmx` since 2026-10-16,
+**outside the repo, not in git** - path hardcoded as `SOURCE_TMX` in the importer). An
+island layout: the old single-landmass village (`map.tmx`, kept for reference, no longer
+imported) was moved into a bigger sea and split into islands by Emil. **180 x 120 tiles**,
+16px; the importer takes the whole map. The house sits 30 cols / 20 rows further in than in
+`map.tmx`, so **cell coordinates quoted below are old `map.tmx` cells** (add 30/20 for
+`map_islands.tmx`) unless stated otherwise. The importer's `SPAWN_COL/ROW` (86,70) is the
+one anchor: NPC spawns, the door trigger and the room-exit landing are all relative to
+`VILLAGE_SPAWN`. Scenery objects rotated in Tiled by a multiple of 90 deg are converted to
+flip bits by the importer; free rotation is skipped *with a warning*. Formerly 120 x 80. Layers use
 a `ground_* / deco_* / col_*` naming scheme (`ground_grass`, `ground_water_collision`,
 `ground_beach`, `ground_paths`, `ground_bridges`, `ground_fences_collision`,
 `deco_small_extras`, `col_house_collision`). Trees/rocks/bushes are **not** a layer - the
@@ -790,9 +798,10 @@ decides what should happen to that piece in Tiled.
 `topLayerName` is currently `undefined`: the old `top_layer_collision` held almost every
 tree, not the house roof - which is *why* items near trees always rendered behind. Give it
 a real value once the house's overhanging roof rows are split into their own layer.
-4 tilesets: Terrains (firstGid 1), Outside_Stuff (2305), Houses (4609), **Ground_Variants
-(6913)** - the last is declared + wired in `useVillageImages` but nothing in the map
-paints from it yet.
+5 tilesets: Terrains (firstGid 1), Outside_Stuff (2305), Houses (4609), **Ground_Variants
+(6913)** (declared + wired, nothing paints from it yet), and **"Terrains, no animation"
+(6918)** - the same Terrains image as a second tileset with no animations, for water-looking
+tiles that must stay still. `useVillageImages` loads it again (same file).
 
 **Modern Exteriors** (outdoor tiles/props) lives at `~/modernexteriors-win`. Its
 `*_Singles_16x16/` folders have every tile pre-cut as its own PNG - grep by name instead of

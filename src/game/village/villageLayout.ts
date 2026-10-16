@@ -526,13 +526,18 @@ const buildVillageLayout = () => {
     // code" in CLAUDE.md:
     //  - the original: just off the player's own spawn so they don't start
     //    stacked.
-    //  - two more, a bit further out on either side of the house (source
-    //    tiles (62,52) and (52,54)), each a different premade sheet so the
-    //    three read as distinct villagers rather than triplets.
+    //  - two more, a bit further out on either side of the house (6 tiles
+    //    right/2 down and 4 left/4 down of the spawn tile), each a
+    //    different premade sheet so the three read as distinct villagers
+    //    rather than triplets.
+    // All relative to VILLAGE_SPAWN (the importer's SPAWN_COL/ROW), so
+    // moving the house in Tiled only means updating that one pair - the
+    // cells were re-verified identical after the island-map move
+    // (2026-10-16, house shifted 30 cols / 20 rows).
     wanderingNpcs: [
       { spawn: { x: VILLAGE_SPAWN.x - 20, y: VILLAGE_SPAWN.y - 4 }, skin: "npc" },
-      { spawn: { x: 1000, y: 840 }, skin: "npc2" },
-      { spawn: { x: 840, y: 872 }, skin: "npc3" },
+      { spawn: { x: VILLAGE_SPAWN.x + 96, y: VILLAGE_SPAWN.y + 32 }, skin: "npc2" },
+      { spawn: { x: VILLAGE_SPAWN.x - 64, y: VILLAGE_SPAWN.y + 64 }, skin: "npc3" },
     ],
     tileCollision: {
       grid: gridShared,
@@ -581,8 +586,9 @@ const buildVillageLayout = () => {
     start: { x: VILLAGE_SPAWN.x, y: VILLAGE_SPAWN.y },
     portals: [
       {
-        // The porch in front of the house door: source tile columns 55-57,
-        // rows 48-49. There is no literal walkable gap in the door's own
+        // The porch in front of the house door: the three tiles centred on
+        // the spawn column, the two rows just above the spawn row
+        // (relative to VILLAGE_SPAWN, like the NPCs above). There is no literal walkable gap in the door's own
         // tiles - every collision layer combined is solid through row 47 -
         // so this is a designed trigger zone (the first open rows below the
         // wall), not a hole in the collision grid. (An earlier version of
@@ -590,7 +596,12 @@ const buildVillageLayout = () => {
         // and therefore unreachable - verified precisely against the whole
         // combined collision grid this time, not just the house's own
         // layer alone.)
-        trigger: { minX: 880, maxX: 928, minY: 768, maxY: 800 },
+        trigger: {
+          minX: VILLAGE_SPAWN.x - 24,
+          maxX: VILLAGE_SPAWN.x + 24,
+          minY: VILLAGE_SPAWN.y - 40,
+          maxY: VILLAGE_SPAWN.y - 8,
+        },
         targetScene: "room",
         // Hardcoded rather than importing ROOM.start, to avoid a circular
         // import (roomLayout.ts's own portal points back here the same

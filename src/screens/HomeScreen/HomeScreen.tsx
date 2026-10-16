@@ -36,6 +36,7 @@ import { useCamera } from "../../game/useCamera";
 import { useCharacter } from "../../game/useCharacter";
 import { useVillageImages } from "../../game/Village";
 import { removeVillageSceneryGroup, VILLAGE } from "../../game/village/villageLayout";
+import { onSceneryReset } from "../../game/village/sceneryReset";
 import { SceneryGroupVisual } from "../../game/village/SceneryGroupVisual";
 import { SceneryRemovalPrompt } from "../../game/village/SceneryRemovalPrompt";
 import { useWanderingNpcCharacters } from "../../game/useWanderingNpcCharacters";
@@ -135,6 +136,10 @@ export default function HomeScreen() {
   useEffect(() => {
     setJSON(StorageKeys.removedScenery, Array.from(removedSceneryIds));
   }, [removedSceneryIds]);
+
+  // Settings -> Developer -> "Restore removed scenery" (see sceneryReset.ts):
+  // the grids are already restored there, this just empties the set.
+  useEffect(() => onSceneryReset(() => setRemovedSceneryIds(new Set())), []);
 
   // The one thing currency currently buys. `removeVillageSceneryGroup`
   // clears the *village's* collision/placement grids specifically (it's

@@ -14,6 +14,12 @@ export const strings = {
     settings: "Settings",
     friendsComingSoon: "Friends - coming soon",
   },
+  developer: {
+    section: "Developer",
+    restoreScenery: "Restore removed scenery",
+    restoreSceneryHint: "Brings back every tree/rock you've removed. Coins aren't refunded.",
+    restoredScenery: "Restored",
+  },
   appearance: {
     section: "Appearance",
     light: "Light",

@@ -508,6 +508,27 @@ const buildVillageLayout = () => {
     return true;
   };
 
+  /**
+   * The inverse of every removeSceneryGroup so far: puts each removed
+   * group's collision/placement footprint back, in one grid push. Only the
+   * Developer "restore removed scenery" tool calls this.
+   */
+  const restoreAllSceneryGroups = () => {
+    for (const id of removedGroupIds) {
+      for (const cell of groupCellsById.get(id) ?? []) {
+        const index = cell.row * VILLAGE_COLUMNS + cell.column;
+        if (cell.solid) {
+          grids.sceneryCollisionCount[index] += 1;
+        }
+        grids.sceneryBlockCount[index] += 1;
+        recomputeCell(grids, index);
+      }
+    }
+    removedGroupIds.clear();
+    gridShared.value = grids.grid.slice();
+    placementGridShared.value = grids.placementGrid.slice();
+  };
+
   const width = VILLAGE_COLUMNS * VILLAGE_TILE;
   const height = VILLAGE_ROWS * VILLAGE_TILE;
 
@@ -613,10 +634,10 @@ const buildVillageLayout = () => {
     ],
   };
 
-  return { scene, removeSceneryGroup };
+  return { scene, removeSceneryGroup, restoreAllSceneryGroups };
 };
 
-const { scene: builtVillage, removeSceneryGroup } = buildVillageLayout();
+const { scene: builtVillage, removeSceneryGroup, restoreAllSceneryGroups } = buildVillageLayout();
 
 /** The village scene the app shows, built once from the imported map. */
 export const VILLAGE = builtVillage;
@@ -629,3 +650,6 @@ export const VILLAGE = builtVillage;
  * whether it actually removed something.
  */
 export const removeVillageSceneryGroup = removeSceneryGroup;
+
+/** Puts every removed scenery group back (collision + placement) - Developer tool only. */
+export const restoreAllVillageScenery = restoreAllSceneryGroups;
